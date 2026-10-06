@@ -1,89 +1,74 @@
-# demo-api
+# Quête 1 — Découverte de Docker
 
-Le fil rouge des quêtes Docker : une mini-API "catalogue" que tu vas
-conteneuriser, faire persister, mettre en réseau, orchestrer et sécuriser,
-une quête à la fois.
+**Branche de travail :** `quest/docker-1-decouverte`
 
-Le métier est volontairement trivial (`Node` + `Express` + `PostgreSQL`,
-un catalogue de produits) : toute la difficulté est sur **Docker**, jamais
-sur le code applicatif.
+Pour cette première quête, j’ai lancé PostgreSQL dans un conteneur Docker. Je me suis ensuite connecté à la base avec `psql`, j’ai créé une table `products` et ajouté un produit. L’exercice m’a permis de manipuler un conteneur et de consulter ses journaux, sans modifier le code de l’API.
 
-## Point de départ
+## Connexion à la base
 
-Ce dossier est ce que tu clones **avant ta première quête Docker**. Il n'y a
-volontairement **aucun fichier Docker** dedans, ni `Dockerfile`, ni
-`compose.yml` : ce sont précisément les fichiers que tu vas écrire, quête
-après quête, en faisant grossir ce dépôt.
+J’ai ouvert `psql` directement dans le conteneur avec cette commande :
 
-Sans conteneur, cette API ne démarre pas telle quelle : elle a besoin d'un
-PostgreSQL joignable pour répondre. C'est normal, et c'est tout le sujet de
-la première quête que de la faire tourner dans Docker.
+```bash
+docker exec -it demo-db psql -U demo -d demo
+```
 
-## Récupérer ce starter dans ton propre repo
+Une fois dans le client SQL, j’ai créé la table, inséré le produit de démonstration, puis vérifié le résultat :
 
-Ce dépôt est un **starter en lecture seule** : tu ne pousses jamais
-directement ici. Avant de démarrer la première quête :
+```text
+$ docker exec -it demo-db psql -U demo -d demo
+psql (16.15)
+Type "help" for help.
 
-1. **Clone** ce repo starter :
-   ```bash
-   git clone git@github.com:ynov-x-anthony/docker-demo-api-starter.git NOM_prenom_demo-api
-   cd NOM_prenom_demo-api
-   ```
-2. **Supprime le remote `origin`** (il pointe vers le starter, pas vers toi) :
-   ```bash
-   git remote remove origin
-   ```
-3. **Crée ton propre repo** sur GitHub, dans l'organisation `ynov-x-anthony`,
-   en respectant la nomenclature **`NOM_prenom_demo-api`** (ex. :
-   `DUPONT_jean_demo-api`), puis ajoute-le comme nouveau remote et pousse :
-   ```bash
-   git remote add origin git@github.com:ynov-x-anthony/NOM_prenom_demo-api.git
-   git push -u origin main
-   ```
+demo=# CREATE TABLE products (id serial primary key, name text, price_cents int);
+CREATE TABLE
+demo=# INSERT INTO products (name, price_cents) VALUES ('Sticker Démo', 150);
+INSERT 0 1
+demo=# SELECT * FROM products;
+ id |     name     | price_cents
+----+--------------+-------------
+  1 | Sticker Démo |         150
+(1 row)
 
-À partir de là, c'est **ton** repo : chaque quête s'y ajoute par des commits,
-et c'est lui qui sera évalué, pas le starter.
+demo=# \dt
+         List of relations
+ Schema |   Name   | Type  | Owner
+--------+----------+-------+-------
+ public | products | table | demo
+(1 row)
 
-## Ce que contient le repo
+demo=# \q
+```
 
-| Fichier | Rôle |
-|---|---|
-| `api/server.js` | l'API Express (`/`, `/version`, `/health`, `/ready`, `/products`) |
-| `api/db.js` | connexion PostgreSQL, entièrement pilotée par des variables d'environnement |
-| `api/package.json`, `api/package-lock.json` | dépendances (`express`, `pg`) |
-| `db/init.sql` | création de la table `products` + quelques données de démo |
+## Vérification du démarrage
 
-## Les routes de l'API
+J’ai consulté les trois dernières lignes des journaux avec :
 
-| Méthode | Route | Effet |
-|---|---|---|
-| `GET` | `/` | infos application + version |
-| `GET` | `/version` | numéro de version courant |
-| `GET` | `/health` | liveness, ne touche pas la base |
-| `GET` | `/ready` | readiness, teste la connexion à la base |
-| `GET` | `/products` | liste des produits |
-| `POST` | `/products` | crée un produit : `{ "name": "...", "price_cents": 1234 }` |
+```bash
+docker logs --tail 3 demo-db
+```
 
-## Ta progression, quête après quête
+La dernière ligne confirme que PostgreSQL est prêt à accepter les connexions :
 
-| Quête | Ce que tu ajoutes au repo |
-|---|---|
-| Découverte de Docker | rien ici, tu manipules des images publiques et un `psql` en conteneur |
-| Le Dockerfile | `api/Dockerfile`, `api/.dockerignore` : l'API tourne enfin dans un conteneur |
-| Les volumes | un volume nommé pour la persistance de PostgreSQL |
-| Les réseaux | des réseaux dédiés, la base jamais exposée directement |
-| Compose | `compose.yml`, `.env.example` : tous les services démarrent ensemble |
-| Dockerfile et sécurité | ton `Dockerfile` durci : utilisateur non-root, `HEALTHCHECK` |
-| Builds multi-étapes et gestion des secrets | `api/Dockerfile.multi` : image allégée, secrets hors de l'image |
-| Analyse de vulnérabilité avec Trivy | un pipeline CI qui scanne ton image et bloque sur les failles critiques |
+```text
+2026-10-06 13:22:33.328 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+2026-10-06 13:22:33.333 UTC [57] LOG:  database system was shut down at 2026-10-06 13:22:33 UTC
+2026-10-06 13:22:33.339 UTC [1] LOG:  database system is ready to accept connections
+```
 
-## Prérequis machine (macOS / Linux / Windows)
+## Résultat
 
-- **Docker Engine + Compose v2** : le plugin intégré, invoqué en deux mots
-  `docker compose` (pas l'ancien binaire autonome `docker-compose` v1).
-  `docker compose version` doit répondre `v2.x` ou une version supérieure
-  (v3, v4, v5…). Ce qui compte, c'est que ce ne soit pas du v1 legacy.
-- macOS / Windows : **Docker Desktop** (ou Colima / Rancher Desktop).
-  Sous Windows, backend **WSL 2** : travaille depuis un terminal **WSL**.
-- `git`, `curl`. Node est nécessaire **seulement** si tu régénères
-  `package-lock.json` (`cd api && npm install`, déjà commité ici).
+La table `products` apparaît bien dans la liste des relations. Elle contient une ligne : le produit `Sticker Démo`, au prix de 150 centimes. Les journaux confirment que la base a démarré correctement.
+
+## Capture d’écran
+
+J’ai conservé cette capture pour montrer la session SQL et les dernières lignes des journaux :
+
+![Preuve terminal — quête Docker 1](docker-1-terminal.png)
+
+## Pour terminer
+
+Après avoir récupéré les sorties nécessaires au rendu, il faut arrêter puis supprimer le conteneur avec :
+
+```bash
+docker stop demo-db && docker rm demo-db
+```
