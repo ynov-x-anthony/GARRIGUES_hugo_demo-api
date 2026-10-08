@@ -1,4 +1,4 @@
-# Quête 6 — Builds multi-étapes et gestion des secrets
+# Quête 4 — Builds multi-étapes et gestion des secrets
 
 ## Travail réalisé
 
@@ -23,7 +23,7 @@ docker image ls demo-api
 
 Avec les valeurs affichées, l’image multi-étapes est environ **7,2× plus petite** en disk usage (environ **7,5×** selon le content size). Les tailles sont celles affichées par Docker, arrondies.
 
-![Builds et tailles des images](captures/captures-4/docker-6-comparaison-tailles.png)
+![Builds et tailles des images](captures/captures-4/docker-4-comparaison-tailles.png)
 
 Le premier build de démonstration du secret a échoué sur un délai d’accès à Docker Hub. Une nouvelle tentative a réussi :
 
@@ -44,7 +44,7 @@ Sortie observée :
 cat: can't open '/root/.npmrc': No such file or directory
 ```
 
-![Preuve que le secret n’apparaît pas dans l’image](captures/captures-4/docker-6-preuve-secret.png)
+![Preuve que le secret n’apparaît pas dans l’image](captures/captures-4/docker-4-preuve-secret.png)
 
 Le port 8080 étant libre, j’ai lancé l’image :
 
