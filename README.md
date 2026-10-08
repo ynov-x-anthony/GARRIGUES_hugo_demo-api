@@ -1,89 +1,70 @@
-# demo-api
+# Quête 3 — Dockerfile et sécurité
 
-Le fil rouge des quêtes Docker : une mini-API "catalogue" que tu vas
-conteneuriser, faire persister, mettre en réseau, orchestrer et sécuriser,
-une quête à la fois.
+## Travail réalisé
 
-Le métier est volontairement trivial (`Node` + `Express` + `PostgreSQL`,
-un catalogue de produits) : toute la difficulté est sur **Docker**, jamais
-sur le code applicatif.
+J’ai durci `api/Dockerfile` avec `node:22.11-alpine`, l’utilisateur `node`, les copies avec `--chown` et un `HEALTHCHECK` sur `/health`. Le `.dockerignore` exclut les fichiers demandés.
 
-## Point de départ
+![Dockerfile et `.dockerignore`](captures/docker-3-dockerfile.png)
 
-Ce dossier est ce que tu clones **avant ta première quête Docker**. Il n'y a
-volontairement **aucun fichier Docker** dedans, ni `Dockerfile`, ni
-`compose.yml` : ce sont précisément les fichiers que tu vas écrire, quête
-après quête, en faisant grossir ce dépôt.
+## Build et preuve du compte non-root
 
-Sans conteneur, cette API ne démarre pas telle quelle : elle a besoin d'un
-PostgreSQL joignable pour répondre. C'est normal, et c'est tout le sujet de
-la première quête que de la faire tourner dans Docker.
+`demo_net`, `demo-db` et `api` étaient absents, et le port 8080 était libre. J’ai créé le réseau :
 
-## Récupérer ce starter dans ton propre repo
+```bash
+docker network create demo_net
+```
 
-Ce dépôt est un **starter en lecture seule** : tu ne pousses jamais
-directement ici. Avant de démarrer la première quête :
+Sortie :
 
-1. **Clone** ce repo starter :
-   ```bash
-   git clone git@github.com:ynov-x-anthony/docker-demo-api-starter.git NOM_prenom_demo-api
-   cd NOM_prenom_demo-api
-   ```
-2. **Supprime le remote `origin`** (il pointe vers le starter, pas vers toi) :
-   ```bash
-   git remote remove origin
-   ```
-3. **Crée ton propre repo** sur GitHub, dans l'organisation `ynov-x-anthony`,
-   en respectant la nomenclature **`NOM_prenom_demo-api`** (ex. :
-   `DUPONT_jean_demo-api`), puis ajoute-le comme nouveau remote et pousse :
-   ```bash
-   git remote add origin git@github.com:ynov-x-anthony/NOM_prenom_demo-api.git
-   git push -u origin main
-   ```
+```text
+7b7720c0df5fd383cedd52a621d9c6059d3442196e2507c60478edf81dcfa930
+```
 
-À partir de là, c'est **ton** repo : chaque quête s'y ajoute par des commits,
-et c'est lui qui sera évalué, pas le starter.
+J’ai construit l’image et vérifié l’utilisateur :
 
-## Ce que contient le repo
+```bash
+docker build -t demo-api:hardened ./api
+docker run --rm demo-api:hardened id
+```
 
-| Fichier | Rôle |
-|---|---|
-| `api/server.js` | l'API Express (`/`, `/version`, `/health`, `/ready`, `/products`) |
-| `api/db.js` | connexion PostgreSQL, entièrement pilotée par des variables d'environnement |
-| `api/package.json`, `api/package-lock.json` | dépendances (`express`, `pg`) |
-| `db/init.sql` | création de la table `products` + quelques données de démo |
+Le build s’est terminé en 1,2 s (11/11 étapes). Sortie de `id` :
 
-## Les routes de l'API
+```text
+uid=1000(node) gid=1000(node) groups=1000(node),1000(node)
+```
 
-| Méthode | Route | Effet |
-|---|---|---|
-| `GET` | `/` | infos application + version |
-| `GET` | `/version` | numéro de version courant |
-| `GET` | `/health` | liveness, ne touche pas la base |
-| `GET` | `/ready` | readiness, teste la connexion à la base |
-| `GET` | `/products` | liste des produits |
-| `POST` | `/products` | crée un produit : `{ "name": "...", "price_cents": 1234 }` |
+![Build et preuve du compte non-root](captures/docker-3-build-et-lancement.png)
 
-## Ta progression, quête après quête
+## Lancement et vérifications
 
-| Quête | Ce que tu ajoutes au repo |
-|---|---|
-| Découverte de Docker | rien ici, tu manipules des images publiques et un `psql` en conteneur |
-| Le Dockerfile | `api/Dockerfile`, `api/.dockerignore` : l'API tourne enfin dans un conteneur |
-| Les volumes | un volume nommé pour la persistance de PostgreSQL |
-| Les réseaux | des réseaux dédiés, la base jamais exposée directement |
-| Compose | `compose.yml`, `.env.example` : tous les services démarrent ensemble |
-| Dockerfile et sécurité | ton `Dockerfile` durci : utilisateur non-root, `HEALTHCHECK` |
-| Builds multi-étapes et gestion des secrets | `api/Dockerfile.multi` : image allégée, secrets hors de l'image |
-| Analyse de vulnérabilité avec Trivy | un pipeline CI qui scanne ton image et bloque sur les failles critiques |
+J’ai lancé l’API avec les options demandées. Aucun PostgreSQL n’était nécessaire pour tester `/health`.
 
-## Prérequis machine (macOS / Linux / Windows)
+```bash
+docker run -d --name api -p 8080:3000 \
+  --read-only --tmpfs /tmp:size=16m \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --pids-limit 200 --memory 256m --cpus 1 \
+  --network demo_net -e PGHOST=demo-db \
+  demo-api:hardened
+```
 
-- **Docker Engine + Compose v2** : le plugin intégré, invoqué en deux mots
-  `docker compose` (pas l'ancien binaire autonome `docker-compose` v1).
-  `docker compose version` doit répondre `v2.x` ou une version supérieure
-  (v3, v4, v5…). Ce qui compte, c'est que ce ne soit pas du v1 legacy.
-- macOS / Windows : **Docker Desktop** (ou Colima / Rancher Desktop).
-  Sous Windows, backend **WSL 2** : travaille depuis un terminal **WSL**.
-- `git`, `curl`. Node est nécessaire **seulement** si tu régénères
-  `package-lock.json` (`cd api && npm install`, déjà commité ici).
+Identifiant retourné : `9534d798f81574fadac266ba34f23b266776461da8f1fac26f37302922ddcd56`.
+
+Vérifications exécutées :
+
+```bash
+curl -s localhost:8080/health
+docker exec api sh -c 'touch /app/x 2>&1 || echo "rootfs read-only OK"'
+docker inspect -f 'readonly={{.HostConfig.ReadonlyRootfs}} capdrop={{.HostConfig.CapDrop}}' api
+```
+
+Sorties observées :
+
+```text
+{"status":"UP"}
+touch: /app/x: Read-only file system
+rootfs read-only OK
+readonly=true capdrop=[ALL]
+```
+
+![Vérifications du conteneur durci](captures/docker-3-verifications.png)
