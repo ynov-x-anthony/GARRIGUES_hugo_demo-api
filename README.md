@@ -1,65 +1,44 @@
-# Quête 4 — Builds multi-étapes et gestion des secrets
+# Quête 5 — Docker : les volumes
 
 ## Travail réalisé
 
-J’ai ajouté `api/Dockerfile.naive` comme repère volontairement lourd (`node:22`, copie complète et dépendances de développement) et `api/Dockerfile.multi` avec une étape `deps` et une étape `runtime` sur `node:22.11-alpine`. L’image finale ne reçoit que les dépendances de production et les fichiers nécessaires à l’API. Elle utilise l’utilisateur `node` et vérifie `/health`.
-
-Le Dockerfile de production `api/Dockerfile` est resté intact. Pour la démonstration BuildKit, j’ai temporairement utilisé un faux secret `FAKE-123`, puis restauré la commande normale `npm ci --omit=dev` dans `Dockerfile.multi` et supprimé le fichier temporaire.
+J’ai préparé `volumes_hugo_garrigues.sh` pour construire l’image `demo-api:1.0`, créer le volume nommé `demo_pgdata`, démarrer PostgreSQL et l’API sur un réseau Docker commun, puis ajouter « Casquette Démo ». Le script supprime ensuite les conteneurs, recrée PostgreSQL avec le même volume et vérifie que le produit est toujours présent. Il nettoie les conteneurs et le réseau à la fin, tout en conservant le volume pour démontrer la persistance.
 
 ## Commandes et vérifications
 
-J’ai construit les deux images et comparé les tailles avec `docker image ls demo-api` :
+La page du cours n’était pas accessible. Le challenge et ses critères ci-dessous viennent du texte fourni en pièce jointe.
+
+J’ai exécuté le script le 9 octobre 2026. La construction de `demo-api:1.0` a réussi, PostgreSQL est devenu prêt à deux reprises, et le volume `demo_pgdata` a été conservé après le nettoyage des conteneurs et du réseau.
+
+Depuis la racine du dépôt, dans un terminal ayant accès au daemon Docker :
 
 ```bash
-docker build -f api/Dockerfile.naive -t demo-api:naive ./api
-docker build -f api/Dockerfile.multi -t demo-api:multi ./api
-docker image ls demo-api
+bash volumes_hugo_garrigues.sh
 ```
 
-| Image | Disk usage | Content size |
-|---|---:|---:|
-| `demo-api:naive` (avant) | 1.65 GB | 413 MB |
-| `demo-api:multi` (après) | 228 MB | 55.1 MB |
-
-Avec les valeurs affichées, l’image multi-étapes est environ **7,2× plus petite** en disk usage (environ **7,5×** selon le content size). Les tailles sont celles affichées par Docker, arrondies.
-
-![Builds et tailles des images](captures/captures-4/docker-4-comparaison-tailles.png)
-
-Le premier build de démonstration du secret a échoué sur un délai d’accès à Docker Hub. Une nouvelle tentative a réussi :
-
-```bash
-docker build --secret id=npmrc,src=/tmp/demo-api-npmrc.OC3Rhv \
-  -f api/Dockerfile.multi -t demo-api:multi ./api
-```
-
-La commande `docker history --no-trunc demo-api:multi | grep -i 'FAKE-123'` n’a retourné aucune ligne. Pour vérifier le fichier en contournant les permissions de l’utilisateur `node`, j’ai lancé :
-
-```bash
-docker run --rm --user root demo-api:multi sh -c 'cat /root/.npmrc 2>&1'
-```
-
-Sortie observée :
+Sortie observée pour le POST, avant et après la recréation de PostgreSQL, et pour le volume :
 
 ```text
-cat: can't open '/root/.npmrc': No such file or directory
+{"id":4,"name":"Casquette Démo","price_cents":1200,"created_at":"2026-10-09T08:38:54.925Z"}
+
+Produits avant suppression du conteneur PostgreSQL :
+[{"id":4,"name":"Casquette Démo","price_cents":1200,"created_at":"2026-10-09T08:38:54.925Z"},{"id":3,"name":"T-shirt conteneur","price_cents":1990,"created_at":"2026-10-09T08:38:53.385Z"},{"id":2,"name":"Mug Docker","price_cents":990,"created_at":"2026-10-09T08:38:53.385Z"},{"id":1,"name":"Sticker Demo","price_cents":150,"created_at":"2026-10-09T08:38:53.385Z"}]
+
+Produits après recréation du conteneur PostgreSQL :
+[{"id":4,"name":"Casquette Démo","price_cents":1200,"created_at":"2026-10-09T08:38:54.925Z"},{"id":3,"name":"T-shirt conteneur","price_cents":1990,"created_at":"2026-10-09T08:38:53.385Z"},{"id":2,"name":"Mug Docker","price_cents":990,"created_at":"2026-10-09T08:38:53.385Z"},{"id":1,"name":"Sticker Demo","price_cents":150,"created_at":"2026-10-09T08:38:53.385Z"}]
+
+Volume conservé pour la preuve :
+local     demo_pgdata
 ```
 
-![Preuve que le secret n’apparaît pas dans l’image](captures/captures-4/docker-4-preuve-secret.png)
+La dernière requête `curl localhost:8080/products` a renvoyé la même liste après la recréation de la base. Le script a ensuite supprimé `demo-api`, `demo-db` et le réseau; le volume est resté disponible.
 
-Le port 8080 étant libre, j’ai lancé l’image :
+Pour supprimer les données après la remise, exécuter manuellement :
 
 ```bash
-docker run --rm -p 8080:3000 demo-api:multi
+docker volume rm demo_pgdata
 ```
 
-Puis j’ai vérifié la route :
+## Capture d’écran
 
-```bash
-curl localhost:8080/health
-```
-
-Sortie observée :
-
-```json
-{"status":"UP"}
-```
+![Exécution du script et preuve de persistance de Casquette Démo](captures/captures-5/docker-5-volumes-persistance.png)
