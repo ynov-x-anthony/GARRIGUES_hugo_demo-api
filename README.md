@@ -1,44 +1,33 @@
-# Quête 5 — Docker : les volumes
+# Quête 6 — Docker : les réseaux
 
 ## Travail réalisé
 
-J’ai préparé `volumes_hugo_garrigues.sh` pour construire l’image `demo-api:1.0`, créer le volume nommé `demo_pgdata`, démarrer PostgreSQL et l’API sur un réseau Docker commun, puis ajouter « Casquette Démo ». Le script supprime ensuite les conteneurs, recrée PostgreSQL avec le même volume et vérifie que le produit est toujours présent. Il nettoie les conteneurs et le réseau à la fin, tout en conservant le volume pour démontrer la persistance.
+J’ai créé `reseaux_hugo_garrigues.sh` pour lancer `demo-db` sur le réseau `demo_back` et `demo-api` sur `demo_front` et `demo_back`. La base n’a pas de port publié. Le script vérifie la résolution DNS depuis l’API, l’isolation d’un conteneur tiers, les adresses IPv4 et la réponse de `/products`, puis nettoie les conteneurs et les réseaux.
 
 ## Commandes et vérifications
 
-La page du cours n’était pas accessible. Le challenge et ses critères ci-dessous viennent du texte fourni en pièce jointe.
-
-J’ai exécuté le script le 9 octobre 2026. La construction de `demo-api:1.0` a réussi, PostgreSQL est devenu prêt à deux reprises, et le volume `demo_pgdata` a été conservé après le nettoyage des conteneurs et du réseau.
-
-Depuis la racine du dépôt, dans un terminal ayant accès au daemon Docker :
+Depuis la racine du dépôt, j’ai lancé :
 
 ```bash
-bash volumes_hugo_garrigues.sh
+./reseaux_hugo_garrigues.sh
 ```
 
-Sortie observée pour le POST, avant et après la recréation de PostgreSQL, et pour le volume :
+Le build de `demo-api:1.0` a réussi. La base a d’abord affiché `no response`, puis `accepting connections`. Depuis l’API, `demo-db` a été résolu à l’adresse `172.23.0.2` :
 
 ```text
-{"id":4,"name":"Casquette Démo","price_cents":1200,"created_at":"2026-10-09T08:38:54.925Z"}
-
-Produits avant suppression du conteneur PostgreSQL :
-[{"id":4,"name":"Casquette Démo","price_cents":1200,"created_at":"2026-10-09T08:38:54.925Z"},{"id":3,"name":"T-shirt conteneur","price_cents":1990,"created_at":"2026-10-09T08:38:53.385Z"},{"id":2,"name":"Mug Docker","price_cents":990,"created_at":"2026-10-09T08:38:53.385Z"},{"id":1,"name":"Sticker Demo","price_cents":150,"created_at":"2026-10-09T08:38:53.385Z"}]
-
-Produits après recréation du conteneur PostgreSQL :
-[{"id":4,"name":"Casquette Démo","price_cents":1200,"created_at":"2026-10-09T08:38:54.925Z"},{"id":3,"name":"T-shirt conteneur","price_cents":1990,"created_at":"2026-10-09T08:38:53.385Z"},{"id":2,"name":"Mug Docker","price_cents":990,"created_at":"2026-10-09T08:38:53.385Z"},{"id":1,"name":"Sticker Demo","price_cents":150,"created_at":"2026-10-09T08:38:53.385Z"}]
-
-Volume conservé pour la preuve :
-local     demo_pgdata
+Résolution DNS depuis l'API :
+172.23.0.2        demo-db  demo-db
 ```
 
-La dernière requête `curl localhost:8080/products` a renvoyé la même liste après la recréation de la base. Le script a ensuite supprimé `demo-api`, `demo-db` et le réseau; le volume est resté disponible.
+Le conteneur limité à `demo_front` n’a pas résolu `demo-db`, comme attendu :
 
-Pour supprimer les données après la remise, exécuter manuellement :
-
-```bash
-docker volume rm demo_pgdata
+```text
+nc: bad address 'demo-db'
+Échec attendu : demo-db n'est pas joignable depuis demo_front seul.
 ```
+
+Les adresses affichées par `docker inspect` étaient `172.23.0.2` pour `demo-db`, et `172.23.0.3` et `172.22.0.2` pour `demo-api` sur ses deux réseaux. La requête `curl localhost:8080/products` a renvoyé les trois produits de `db/init.sql` : Sticker Demo, Mug Docker et T-shirt conteneur. Le script a ensuite supprimé les deux conteneurs et les réseaux `demo_front` et `demo_back`.
 
 ## Capture d’écran
 
-![Exécution du script et preuve de persistance de Casquette Démo](captures/captures-5/docker-5-volumes-persistance.png)
+![Exécution du script et vérifications des réseaux Docker](captures/captures-6/docker-6-reseaux.png)
