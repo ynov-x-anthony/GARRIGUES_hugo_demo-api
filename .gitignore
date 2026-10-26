@@ -1,4 +1,6 @@
 node_modules/
 *.log
 .env
+secrets/*
+!secrets/db_password.txt.example
 .DS_Store

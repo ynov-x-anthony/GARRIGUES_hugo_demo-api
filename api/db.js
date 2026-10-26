@@ -4,13 +4,29 @@
 // d'environnement (bonne pratique 12-factor). En Compose, PGHOST = le nom
 // du service "db", resolu par le DNS interne de Docker.
 
+const fs = require('fs');
 const { Pool } = require('pg');
+
+// Le mot de passe vient soit de PGPASSWORD, soit du fichier monte par un
+// secret Docker (PGPASSWORD_FILE), pour ne pas l'exposer dans `docker inspect`.
+function readPassword() {
+  if (process.env.PGPASSWORD) return process.env.PGPASSWORD;
+  const file = process.env.PGPASSWORD_FILE;
+  if (file) {
+    try {
+      return fs.readFileSync(file, 'utf8').trim();
+    } catch (err) {
+      throw new Error(`Lecture impossible de PGPASSWORD_FILE (${file}) : ${err.message}`);
+    }
+  }
+  return 'demo';
+}
 
 const pool = new Pool({
   host: process.env.PGHOST || 'db',
   port: Number(process.env.PGPORT || 5432),
   user: process.env.PGUSER || 'demo',
-  password: process.env.PGPASSWORD || 'demo',
+  password: readPassword(),
   database: process.env.PGDATABASE || 'demo',
   max: Number(process.env.PGPOOL_MAX || 5),
   connectionTimeoutMillis: 3000,
