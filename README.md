@@ -121,4 +121,4 @@ docker compose up -d --build
 ## Liens de publication
 
 - Dépôt GitHub : [ynov-x-anthony/GARRIGUES_hugo_demo-api](https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api)
-- Branche de rendu `quest/docker-7-docker-compose` : à pousser après vérification.
+- Branche de rendu : [`quest/docker-7-docker-compose`](https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api/tree/quest/docker-7-docker-compose)
