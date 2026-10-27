@@ -15,6 +15,7 @@ const db = require('./db');
 
 const PORT = Number(process.env.PORT || 3000);
 const VERSION = process.env.VERSION || 'dev';
+const NOTIFIER_PORT = Number(process.env.NOTIFIER_PORT || 4000);
 
 const app = express();
 app.use(express.json());
@@ -63,7 +64,24 @@ app.post('/products', async (req, res) => {
     return res.status(400).json({ error: 'name (string) et price_cents (entier >= 0) requis' });
   }
   try {
-    res.status(201).json(await db.addProduct(name, priceCents));
+    const product = await db.addProduct(name, priceCents);
+    res.status(201).json(product);
+
+    // Best-effort : on ne l'attend pas et une panne de notifier ne doit
+    // jamais faire echouer la creation du produit. Le nom "notifier" est
+    // resolu par le DNS interne du reseau Compose "back".
+    fetch(`http://notifier:${NOTIFIER_PORT}/notify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: product.name }),
+      signal: AbortSignal.timeout(2000),
+    })
+      .then((response) => {
+        if (!response.ok) {
+          console.error(`[api] notify failed: HTTP ${response.status}`);
+        }
+      })
+      .catch((err) => console.error('[api] notify failed:', err.message));
   } catch (err) {
     res.status(503).json({ error: 'db_unavailable', detail: err.message });
   }

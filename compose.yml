@@ -1,19 +1,35 @@
 services:
     api:
-        build: ./api
+        image: ${IMAGE_PREFIX:-ghcr.io/ynov-x-anthony/garrigues_hugo_demo-api}/api:${IMAGE_TAG:-latest}
+        build:
+            context: ./api
+            dockerfile: Dockerfile.multi
         environment:
             PGHOST: db
             PGUSER: ${POSTGRES_USER}
             PGPASSWORD_FILE: /run/secrets/db_password
             PGDATABASE: ${POSTGRES_DB}
+            NOTIFIER_PORT: ${NOTIFIER_PORT:-4000}
         ports:
             - "${API_PORT:-8080}:3000"
         depends_on:
             db:
                 condition: service_healthy
+        networks: [front, back]
         restart: unless-stopped
         secrets:
             - db_password
+
+    notifier:
+        image: ${IMAGE_PREFIX:-ghcr.io/ynov-x-anthony/garrigues_hugo_demo-api}/notifier:${IMAGE_TAG:-latest}
+        build:
+            context: ./notifier
+        environment:
+            PORT: ${NOTIFIER_PORT:-4000}
+        # Pas de ports: : rien en dehors du reseau back n'a besoin de
+        # l'appeler directement, exactement comme la base de donnees.
+        networks: [back]
+        restart: unless-stopped
 
     db:
         image: postgres:16-alpine
@@ -33,6 +49,7 @@ services:
             interval: 5s
             timeout: 3s
             retries: 10
+        networks: [back]
         restart: unless-stopped
         secrets:
             - db_password
@@ -42,7 +59,15 @@ services:
         ports:
             - "${ADMINER_PORT:-8081}:8080"
         depends_on: [db]
+        # Adminer est une console d'administration : elle a besoin du front
+        # pour etre joignable depuis l'hote et du back pour joindre db.
+        networks: [front, back]
         restart: unless-stopped
+
+networks:
+    front:
+    back:
+        internal: true
 
 volumes:
     pgdata:

@@ -1,4 +1,4 @@
-name: CI demo-api
+name: CI/CD demo-api
 
 on:
   push:
@@ -9,9 +9,22 @@ permissions:
   contents: read
 
 jobs:
-  build-and-scan:
-    name: Build et scan Trivy
+  image:
+    name: Image ${{ matrix.service }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, notifier]
+        include:
+          - service: api
+            dockerfile: api/Dockerfile.multi
+          - service: notifier
+            dockerfile: notifier/Dockerfile
+
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Récupérer le dépôt
@@ -20,20 +33,103 @@ jobs:
       - name: Configurer Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Calculer le nom d'image (GHCR en minuscules)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.service }}" >> "$GITHUB_ENV"
+
       - name: Construire l'image pour le scan
         uses: docker/build-push-action@v6
         with:
-          context: ./api
-          file: ./api/Dockerfile.multi
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.dockerfile }}
           load: true
-          tags: demo-api:ci
+          tags: ${{ env.IMAGE }}:ci
 
       - name: Scanner l'image avec Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: demo-api:ci
+          image-ref: ${{ env.IMAGE }}:ci
           scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
           format: table
+
+      - name: Login GHCR (tags seulement)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # On pousse l'image locale déjà scannée : c'est exactement le même
+      # contenu qui a passé la gate Trivy, sans rebuild intermédiaire.
+      - name: Publier l'image scannée (tags seulement)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          docker tag "$IMAGE:ci" "$IMAGE:${GITHUB_REF_NAME}"
+          docker push "$IMAGE:${GITHUB_REF_NAME}"
+
+  deploy:
+    name: Déploiement continu (simulé sur le runner)
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Préparer la configuration de la stack
+        run: |
+          echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          mkdir -p secrets
+          echo "ci-$(openssl rand -hex 12)" > secrets/db_password.txt
+          cat > .env <<EOF
+          COMPOSE_PROJECT_NAME=demo-api
+          POSTGRES_USER=demo
+          POSTGRES_DB=demo
+          API_PORT=8080
+          ADMINER_PORT=8081
+          DB_PASSWORD_FILE=./secrets/db_password.txt
+          NOTIFIER_PORT=4000
+          IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}
+          IMAGE_TAG=${GITHUB_REF_NAME}
+          EOF
+
+      # Même mécanique qu'un déploiement sur un serveur : on récupère les
+      # images publiées et scannées, on ne rebuild rien sur la cible.
+      - name: Déployer la stack (pull + up -d)
+        run: |
+          docker compose pull
+          docker compose up -d --remove-orphans
+
+      - name: Vérifier la stack déployée
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/ready >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8080/health
+          curl -fsS -X POST http://localhost:8080/products \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"Clavier meca deploye","price_cents":5900}'
+          sleep 2
+          docker compose logs notifier | tail -5
+          docker compose ps
+
+      - name: Arrêter la stack
+        if: always()
+        run: docker compose down -v

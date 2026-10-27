@@ -1,173 +1,251 @@
-# Quête 8 — Docker : analyse de vulnérabilité avec Trivy
+# Quête 9 : Docker, microservices et déploiement continu
 
 ## Travail réalisé
 
-J’ai scanné l’image `demo-api:multi` construite depuis `api/Dockerfile.multi` avec Trivy. Le binaire n’étant pas installé sur ma machine, j’ai utilisé l’image officielle `aquasec/trivy:latest` (Trivy 0.76.1). J’ai limité le rapport aux vulnérabilités avec `--scanners vuln` et conservé les sorties complètes dans [`scan-avant.txt`](scan-avant.txt) et [`scan-apres.txt`](scan-apres.txt).
+J’ai fait passer la stack d’une application multi-conteneurs à une vraie séparation en deux services métier. `notifier` est maintenant un service indépendant, avec son propre `package.json`, son propre `Dockerfile` et son propre cycle de build/publication. `api` ne connaît de lui qu’une URL interne : `http://notifier:4000/notify`.
 
-Le premier scan sépare bien les deux familles :
+La différence concrète avec la stack précédente, c’est que `notifier` peut être reconstruit et publié sans toucher à l’image de `api`. Les deux services ne partagent ni code, ni build, seulement le réseau `back` et un contrat HTTP très simple.
 
-| Section | Avant correction | Après correction |
-|---|---:|---:|
-| Paquets OS (Alpine 3.20.3 → 3.24.3) | 21 CVE (19 HIGH, 2 CRITICAL) | 0 |
-| Dépendances Node | 34 CVE (31 HIGH, 3 CRITICAL) | 0 |
-| **Total HIGH/CRITICAL** | **55** | **0** |
+Fichiers créés ou modifiés :
 
-`npm audit` remontait de son côté 4 vulnérabilités dans les dépendances applicatives (1 critique, 1 haute, 2 modérées).
+| Fichier | Rôle |
+|---|---|
+| `notifier/server.js` | service Express minimal : `GET /health` et `POST /notify`, qui logge le corps reçu |
+| `notifier/package.json` + `notifier/package-lock.json` | dépendances propres au service (`express` 4.22.3, audit à 0 vulnérabilité) |
+| `notifier/Dockerfile` | build multi-stage durci : base `node:22.23.4-alpine3.24`, `USER node`, `HEALTHCHECK`, `npm`/`corepack` retirés du runtime |
+| `notifier/.dockerignore` | contexte de build minimal |
+| `compose.yml` | ajout du service `notifier`, réseaux `front`/`back`, images GHCR paramétrées |
+| `api/server.js` | appel HTTP best-effort vers `notifier` après un `POST /products` réussi |
+| `.github/workflows/ci.yml` | CI en matrix `api`/`notifier`, gate Trivy et publication GHCR, puis job `deploy` sur les tags `v*` |
+| `.env.example` | ajout de `NOTIFIER_PORT`, `IMAGE_PREFIX` et `IMAGE_TAG` |
 
-J’ai corrigé :
+### Séparation réseau
 
-- la base `node:22.11-alpine` (Alpine 3.20.3) en passant à `node:22.23.4-alpine3.24` (Alpine 3.24.3) dans les deux étapes du build ;
-- les dépendances applicatives avec `npm audit fix` dans `api/` : `express` 4.22.3, `body-parser` 1.20.9, `proxy-addr` 2.0.8 et `qs` 6.16.1, avec `package-lock.json` mis à jour ;
-- les dépendances embarquées par le CLI `npm` : `npm` et `corepack` sont retirés du stage `runtime`, car l’image finale n’en a pas besoin. Cela supprime les 10 HIGH qui restaient dans `/usr/local/lib/node_modules/npm`.
+J’ai ajouté les deux réseaux demandés :
 
-Aucun `.trivyignore` n’est nécessaire : après correction, Trivy ne remonte plus aucune CVE HIGH/CRITICAL, y compris sans `--ignore-unfixed`.
+- `front` : réseau des services exposés (ceux qui publient un port), utilisé par `api` et `adminer` ;
+- `back` : réseau interne (`internal: true`), utilisé par `api`, `db`, `notifier` et `adminer` (Adminer doit joindre la base).
 
-J’ai ajouté `.github/workflows/ci.yml`. À chaque push, sur les branches comme sur les tags `v*`, la CI construit `api/Dockerfile.multi`, charge l’image `demo-api:ci` et lance `aquasecurity/trivy-action` avec `severity: CRITICAL,HIGH`, `ignore-unfixed: true` et `exit-code: '1'`. La gate est configurée pour s’appliquer partout, y compris sur les tags de publication.
+`notifier` n’est que sur `back` et n’a **aucun `ports:`**. Comme `db`, il n’est joignable que par les autres conteneurs du réseau. C’est le DNS interne de Compose qui résout `notifier` et `db` par leur nom de service.
+
+### Appel best-effort
+
+Après l’insertion en base, `api` renvoie immédiatement le `201` avec le produit créé, puis lance l’appel vers `notifier` sans l’attendre. L’appel a un timeout de 2 s et toutes ses erreurs sont seulement loggées : une panne de `notifier` ne peut donc pas faire échouer la création d’un produit.
+
+### Images et déploiement
+
+Les deux services ont maintenant une image explicite dans Compose :
+
+```text
+${IMAGE_PREFIX}/api:${IMAGE_TAG}
+${IMAGE_PREFIX}/notifier:${IMAGE_TAG}
+```
+
+En local, `IMAGE_TAG` vaut `latest` et le build se fait avec `docker compose up --build`. En déploiement, le job passe `IMAGE_TAG` à la version du tag Git (`v1.5.0` par exemple) : `docker compose pull` récupère exactement les images publiées et scannées en CI, sans rebuild sur la cible.
+
+### CI/CD
+
+Le job `image` utilise une matrix :
+
+- `api` → `api/Dockerfile.multi` ;
+- `notifier` → `notifier/Dockerfile`.
+
+Chaque service est construit séparément, scanné par Trivy (`CRITICAL,HIGH`, `ignore-unfixed`, `exit-code: 1`) puis poussé sur GHCR sous `ghcr.io/<repo>/<service>:<tag>` uniquement sur un tag `v*`. Le nom du dépôt est passé en minuscules, GHCR refusant les majuscules.
+
+Le job `deploy` dépend du job `image` et ne s’exécute que sur les tags `v*`. Il se connecte à GHCR, prépare un `.env` et un secret de base éphémères, puis exécute la même mécanique qu’un serveur :
+
+```bash
+docker compose pull
+docker compose up -d --remove-orphans
+```
+
+Il vérifie ensuite `GET /ready`, `GET /health`, crée un produit avec `POST /products` pour déclencher une notification, affiche les logs de `notifier`, puis arrête la stack.
+
+Je n’avais pas de VM sous la main, donc j’ai utilisé la variante **simulée sur le runner GitHub**. C’est moins réaliste qu’un vrai serveur, mais les images viennent bien de GHCR et aucun build n’est fait sur la cible. La variante SSH réelle est donnée plus bas.
 
 ## Commandes et vérifications
 
-### Scan initial
+### Build et démarrage de la stack
 
 ```bash
-docker build -f api/Dockerfile.multi -t demo-api:multi ./api
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
-  --no-progress demo-api:multi | tee scan-avant.txt
+docker compose build
+docker compose up -d --remove-orphans
+docker compose ps
 ```
 
-Extrait observé :
+Résultat observé : les quatre conteneurs sont démarrés, `api`, `db` et `notifier` sont `healthy`.
 
 ```text
-demo-api:multi (alpine 3.20.3)
-==============================
-Total: 21 (HIGH: 19, CRITICAL: 2)
-
-Node.js (node-pkg)
-==================
-Total: 34 (HIGH: 31, CRITICAL: 3)
+demo-api-api-1        ... Up (healthy)   0.0.0.0:8080->3000/tcp
+demo-api-notifier-1   ... Up (healthy)   4000/tcp
+demo-api-db-1         ... Up (healthy)   5432/tcp
+demo-api-adminer-1    ... Up             0.0.0.0:8081->8080/tcp
 ```
 
-### Correction des dépendances
+### Notification de bout en bout
 
 ```bash
-cd api
-npm audit fix
-npm audit --omit=dev
+curl -s -w '\nHTTP %{http_code}\n' -X POST localhost:8080/products \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Clavier meca","price_cents":5900}'
+docker compose logs notifier | tail -5
 ```
 
-`npm audit fix` a mis à jour le lockfile et `npm audit --omit=dev` s’est terminé par :
+Sortie observée :
 
 ```text
-found 0 vulnerabilities
+{"id":6,"name":"Clavier meca","price_cents":5900,"created_at":"2026-10-27T13:17:33.068Z"}
+HTTP 201
+notifier-1  | [notifier] nouveau produit : {"name":"Clavier meca"}
 ```
 
-### Scan après correction
+![Création d'un produit en 201 et notification reçue par notifier](captures/captures-9/docker-9-notification.png)
+
+Le message `curl` transitoire visible sur la capture vient de l’attente de disponibilité pendant le redémarrage des conteneurs. La requête aboutit bien à `201` et `notifier` reçoit la notification juste après.
+
+### Preuve réseau : DNS interne et absence de port publié
 
 ```bash
-docker build -f api/Dockerfile.multi -t demo-api:multi ./api
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
-  --ignore-unfixed --no-progress demo-api:multi | tee scan-apres.txt
-```
-
-Extraits observés :
-
-```text
-│ demo-api:multi (alpine 3.24.3)                        │  alpine  │        0        │
-│ app/node_modules/express/package.json                 │ node-pkg │        0        │
-│ app/node_modules/pg/package.json                      │ node-pkg │        0        │
-```
-
-Le rapport complet ne contient plus aucune ligne de vulnérabilité HIGH/CRITICAL. J’ai aussi lancé un scan JSON sans `--ignore-unfixed`, puis compté les résultats : les deux familles sont à zéro.
-
-```bash
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
-  --format json --no-progress demo-api:multi > /tmp/scan-after-all.json
-```
-
-```text
-Comptage des résultats :
-demo-api:multi (alpine 3.24.3) os-pkgs 0
-Node.js lang-pkgs 0
-```
-
-### Vérification de l’image
-
-```bash
-docker run -d --name demo-api-trivy-check -p 127.0.0.1:18080:3000 demo-api:multi
-sleep 18
-curl -s -w '\nHTTP %{http_code}\n' http://127.0.0.1:18080/health
-docker inspect demo-api-trivy-check --format '{{.State.Health.Status}}'
-docker exec demo-api-trivy-check sh -c 'command -v npm || echo "npm absent"'
-docker rm -f demo-api-trivy-check
+docker ps --format '{{.Names}}\t{{.Ports}}'
+docker compose exec -T api getent hosts notifier
+docker compose exec -T api getent hosts db
+docker compose exec -T api node -e "fetch('http://notifier:4000/health').then(r=>console.log('api -> notifier HTTP '+r.status))"
+docker inspect demo-api-notifier-1 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+docker inspect demo-api-api-1 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'
 ```
 
 Sorties observées :
 
 ```text
-{"status":"UP"}
-HTTP 200
-healthy
+demo-api-notifier-1   4000/tcp              ← aucun port publié sur l'hôte
+demo-api-api-1        0.0.0.0:8080->3000/tcp
+demo-api-db-1         5432/tcp
+
+172.23.0.2        notifier  notifier
+172.23.0.3        db  db
+api -> notifier HTTP 200
+
+demo-api_back
+demo-api_back demo-api_front
+```
+
+Le réseau `back` est bien interne :
+
+```text
+demo-api_back internal=true containers=4
+demo-api_front internal=false containers=2
+```
+
+![Ports publiés et réseaux front/back](captures/captures-9/docker-9-reseaux.png)
+
+### Best-effort : `notifier` arrêté, `POST /products` répond quand même
+
+```bash
+docker compose stop notifier
+curl -s -w '\nHTTP %{http_code}\n' -X POST localhost:8080/products \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Produit sans notifier","price_cents":1200}'
+sleep 3
+docker compose logs api | tail -1
+docker compose start notifier
+```
+
+Sorties observées :
+
+```text
+{"id":7,"name":"Produit sans notifier","price_cents":1200,"created_at":"2026-10-27T13:17:37.383Z"}
+HTTP 201
+[api] notify failed: The operation was aborted due to timeout
+```
+
+La requête répond bien `201` immédiatement ; l’échec de notification apparaît seulement dans les logs de l’API, après le timeout de 2 s.
+
+### Durcissement de l’image `notifier`
+
+```bash
+docker compose exec -T notifier id
+docker inspect demo-api-notifier-1 --format 'health={{.State.Health.Status}} user={{.Config.User}}'
+docker compose exec -T notifier sh -c 'command -v npm || echo "npm absent"'
+```
+
+Sorties observées :
+
+```text
+uid=1000(node) gid=1000(node) groups=1000(node)
+health=healthy user=node
 npm absent
 ```
 
-## Preuve de la gate CI
+### Scan Trivy des deux images
 
-Le workflow complet est dans [`.github/workflows/ci.yml`](.github/workflows/ci.yml). L’étape qui bloque une régression est :
+```bash
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
+  --ignore-unfixed --no-progress \
+  ghcr.io/ynov-x-anthony/garrigues_hugo_demo-api/api:latest
+
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
+  --ignore-unfixed --no-progress \
+  ghcr.io/ynov-x-anthony/garrigues_hugo_demo-api/notifier:latest
+```
+
+Résumés observés :
+
+```text
+ghcr.io/.../api:latest (alpine 3.24.3)       alpine   0
+ghcr.io/.../notifier:latest (alpine 3.24.3)  alpine   0
+```
+
+Aucune vulnérabilité HIGH/CRITICAL dans les deux images, ce qui permet à la gate `exit-code: 1` de la CI de passer.
+
+## Variante SSH réelle du job `deploy`
+
+Pour un vrai serveur (VM, VPS) ayant le dépôt cloné dans `/opt/demo-api` et Docker Compose installé, le job simulé se remplace par :
 
 ```yaml
-- name: Scanner l'image avec Trivy
-  uses: aquasecurity/trivy-action@v0.36.0
-  with:
-    image-ref: demo-api:ci
-    scanners: vuln
-    severity: CRITICAL,HIGH
-    ignore-unfixed: true
-    exit-code: '1'
-    format: table
+deploy:
+  needs: image
+  if: startsWith(github.ref, 'refs/tags/v')
+  runs-on: ubuntu-latest
+  steps:
+    - name: Déployer sur le serveur cible
+      uses: appleboy/ssh-action@v1
+      with:
+        host: ${{ secrets.DEPLOY_HOST }}
+        username: ${{ secrets.DEPLOY_USER }}
+        key: ${{ secrets.DEPLOY_SSH_KEY }}
+        script: |
+          cd /opt/demo-api
+          git fetch --tags
+          git pull --ff-only
+          IMAGE_TAG=${{ github.ref_name }} docker compose pull
+          IMAGE_TAG=${{ github.ref_name }} docker compose up -d --remove-orphans
+          docker image prune -f
 ```
 
-J’ai reproduit l’étape de build de la CI localement ; l’image `demo-api:ci` s’est chargée sans erreur :
+Il faut alors créer les secrets `DEPLOY_HOST`, `DEPLOY_USER` et `DEPLOY_SSH_KEY`, renseigner `IMAGE_PREFIX` dans le `.env` du serveur, et s’assurer qu’il peut tirer les images GHCR (`docker login ghcr.io` si les paquets ne sont pas publics).
 
-```bash
-docker buildx build --load -f api/Dockerfile.multi -t demo-api:ci ./api
-```
-
-J’ai ensuite reproduit les deux états de la gate avec la même commande Trivy et `--exit-code 1`.
-
-Régression volontaire, en reconstruisant une image temporaire avec l’ancienne base `node:22.11-alpine` :
-
-```bash
-sed 's#node:22.23.4-alpine3.24#node:22.11-alpine#g' api/Dockerfile.multi > /tmp/Dockerfile.regression
-docker build -f /tmp/Dockerfile.regression -t demo-api:regression ./api
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
-  --ignore-unfixed --exit-code 1 --no-progress demo-api:regression
-```
-
-Résultat observé : code de sortie `1`, avec `Total: 21 (HIGH: 19, CRITICAL: 2)`. La CI serait rouge.
-
-Image corrigée :
-
-```bash
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
-  --ignore-unfixed --exit-code 1 --no-progress demo-api:multi
-```
-
-Résultat observé : code de sortie `0`, avec `demo-api:multi (alpine 3.24.3)` à `0` vulnérabilité. La CI serait verte.
-
-Les deux runs GitHub Actions seront à ajouter après le push : je n’ai pas poussé ni créé de tag à la place de l’utilisateur.
+Je n’ai pas poussé de tag. Le run vert et les images GHCR seront à compléter après le push de `v1.5.0`.
 
 ## Captures d’écran
 
-Aucune capture n’a été fournie pour cette quête. Les preuves sont les rapports [`scan-avant.txt`](scan-avant.txt) et [`scan-apres.txt`](scan-apres.txt), ainsi que les sorties ci-dessus. Les captures des deux runs CI pourront être ajoutées en même temps que les liens de publication.
+Deux captures sont intégrées dans les sections correspondantes :
+
+- [`captures/captures-9/docker-9-notification.png`](captures/captures-9/docker-9-notification.png) : build, démarrage de la stack, `POST /products` en `201` et log `[notifier] nouveau produit` ;
+- [`captures/captures-9/docker-9-reseaux.png`](captures/captures-9/docker-9-reseaux.png) : ports publiés, DNS interne et réseaux `front`/`back`.
+
+Il reste deux captures à faire après le push du tag :
+
+- `captures/docker-9-actions-run.png` : le run GitHub Actions vert avec les deux jobs `Image api` / `Image notifier` puis `deploy` ;
+- `captures/docker-9-ghcr.png` : les deux images `api` et `notifier` sur GHCR, taguées `v1.5.0`.
 
 ## Liens de publication
 
 - Dépôt GitHub : [ynov-x-anthony/GARRIGUES_hugo_demo-api](https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api)
-- Branche de rendu : [`quest/docker-8-analyse-trivy`](https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api/tree/quest/docker-8-analyse-trivy)
+- Branche de rendu (à pousser) : `quest/docker-9-microservices-cd`
 - Workflow : [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
-- Run rouge (régression volontaire) : à compléter après le push.
-- Run vert (image corrigée) : à compléter après le push.
+- Images GHCR attendues après le tag `v1.5.0` :
+  - `ghcr.io/ynov-x-anthony/garrigues_hugo_demo-api/api:v1.5.0`
+  - `ghcr.io/ynov-x-anthony/garrigues_hugo_demo-api/notifier:v1.5.0`
+- Run GitHub Actions vert (matrix + deploy) : à compléter après le push du tag.
