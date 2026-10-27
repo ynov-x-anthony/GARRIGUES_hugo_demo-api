@@ -1,0 +1,39 @@
+name: CI demo-api
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-scan:
+    name: Build et scan Trivy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Configurer Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Construire l'image pour le scan
+        uses: docker/build-push-action@v6
+        with:
+          context: ./api
+          file: ./api/Dockerfile.multi
+          load: true
+          tags: demo-api:ci
+
+      - name: Scanner l'image avec Trivy
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: demo-api:ci
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table

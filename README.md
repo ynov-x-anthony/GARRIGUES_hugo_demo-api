@@ -1,124 +1,173 @@
-# Quête 7 — Docker : Docker Compose
+# Quête 8 — Docker : analyse de vulnérabilité avec Trivy
 
 ## Travail réalisé
 
-`compose.yml` lance les trois services du fil rouge :
+J’ai scanné l’image `demo-api:multi` construite depuis `api/Dockerfile.multi` avec Trivy. Le binaire n’étant pas installé sur ma machine, j’ai utilisé l’image officielle `aquasec/trivy:latest` (Trivy 0.76.1). J’ai limité le rapport aux vulnérabilités avec `--scanners vuln` et conservé les sorties complètes dans [`scan-avant.txt`](scan-avant.txt) et [`scan-apres.txt`](scan-apres.txt).
 
-- `api` : construit depuis `./api`, publiée sur `${API_PORT:-8080}`.
-- `db` : `postgres:16-alpine`, non publiée sur l’hôte, avec le volume nommé `pgdata`, `db/init.sql` monté en lecture seule et un healthcheck `pg_isready`.
-- `adminer` : `adminer:4`, publiée sur `${ADMINER_PORT:-8081}`.
+Le premier scan sépare bien les deux familles :
 
-`api` attend que `db` soit `service_healthy` avant de démarrer et redémarre avec `restart: unless-stopped`.
+| Section | Avant correction | Après correction |
+|---|---:|---:|
+| Paquets OS (Alpine 3.20.3 → 3.24.3) | 21 CVE (19 HIGH, 2 CRITICAL) | 0 |
+| Dépendances Node | 34 CVE (31 HIGH, 3 CRITICAL) | 0 |
+| **Total HIGH/CRITICAL** | **55** | **0** |
 
-La configuration passe par `.env` (interpolation `${}` de Compose, avec `.env.example` versionné et `.env` ignoré). Le mot de passe de la base est un secret Docker monté dans `/run/secrets/db_password` : PostgreSQL le lit via `POSTGRES_PASSWORD_FILE`, l’API via `PGPASSWORD_FILE`. `api/db.js` lit ce fichier lorsque la variable est définie. `secrets/db_password.txt` est ignoré par Git, seul `secrets/db_password.txt.example` est versionné.
+`npm audit` remontait de son côté 4 vulnérabilités dans les dépendances applicatives (1 critique, 1 haute, 2 modérées).
 
-`.env` ne sert qu’à l’interpolation : il n’est pas injecté dans les conteneurs. Les variables utiles sont déclarées dans `environment:`, et le mot de passe arrive par le secret.
+J’ai corrigé :
 
-## Prérequis et démarrage
+- la base `node:22.11-alpine` (Alpine 3.20.3) en passant à `node:22.23.4-alpine3.24` (Alpine 3.24.3) dans les deux étapes du build ;
+- les dépendances applicatives avec `npm audit fix` dans `api/` : `express` 4.22.3, `body-parser` 1.20.9, `proxy-addr` 2.0.8 et `qs` 6.16.1, avec `package-lock.json` mis à jour ;
+- les dépendances embarquées par le CLI `npm` : `npm` et `corepack` sont retirés du stage `runtime`, car l’image finale n’en a pas besoin. Cela supprime les 10 HIGH qui restaient dans `/usr/local/lib/node_modules/npm`.
 
-- Docker avec le plugin Compose v2.
-- Les ports 8080 et 8081 libres.
+Aucun `.trivyignore` n’est nécessaire : après correction, Trivy ne remonte plus aucune CVE HIGH/CRITICAL, y compris sans `--ignore-unfixed`.
 
-```bash
-cp .env.example .env
-cp secrets/db_password.txt.example secrets/db_password.txt
-# remplacer « change-moi » par le mot de passe voulu dans secrets/db_password.txt
-docker compose up -d --build
-```
+J’ai ajouté `.github/workflows/ci.yml`. À chaque push, sur les branches comme sur les tags `v*`, la CI construit `api/Dockerfile.multi`, charge l’image `demo-api:ci` et lance `aquasecurity/trivy-action` avec `severity: CRITICAL,HIGH`, `ignore-unfixed: true` et `exit-code: '1'`. La gate est configurée pour s’appliquer partout, y compris sur les tags de publication.
 
-URLs :
+## Commandes et vérifications
 
-- API : <http://localhost:8080/products>
-- Santé : <http://localhost:8080/health> et <http://localhost:8080/ready>
-- Adminer : <http://localhost:8081> (serveur `db`, utilisateur `demo`, base `demo`)
-
-## Vérifications
-
-### Démarrage de la stack
-
-```text
-Container demo-api-db-1 Healthy
-Container demo-api-api-1 Started
-Container demo-api-adminer-1 Started
-```
-
-![docker compose up -d --build](captures/captures-7/image-1.png)
-
-`docker compose config --quiet` se termine avec le code 0. La configuration résolue contient `POSTGRES_PASSWORD_FILE=/run/secrets/db_password` et aucun mot de passe en clair.
-
-### État des services
-
-```text
-NAME                 IMAGE                COMMAND                  SERVICE   CREATED          STATUS                    PORTS
-demo-api-adminer-1   adminer:4            "entrypoint.sh docke…"   adminer   41 seconds ago   Up 40 seconds             0.0.0.0:8081->8080/tcp, [::]:8081->8080/tcp
-demo-api-api-1       demo-api-api         "docker-entrypoint.s…"   api       41 seconds ago   Up 35 seconds (healthy)   0.0.0.0:8080->3000/tcp, [::]:8080->3000/tcp
-demo-api-db-1        postgres:16-alpine   "docker-entrypoint.s…"   db        41 seconds ago   Up 40 seconds (healthy)   5432/tcp
-```
-
-![docker compose ps](captures/captures-7/image-2.png)
-
-La base est `healthy`, l’API est `Up (healthy)` et `db` ne publie que le port interne `5432/tcp`. Adminer répond en HTTP 200 sur `localhost:8081`.
-
-### API et persistance
-
-Les produits de `db/init.sql` sont présents :
-
-```text
-{"id":3,"name":"T-shirt conteneur","price_cents":1990}
-{"id":2,"name":"Mug Docker","price_cents":990}
-{"id":1,"name":"Sticker Demo","price_cents":150}
-```
-
-`curl -s localhost:8080/products` renvoie les mêmes produits avec le champ `created_at` en plus.
-
-![Ajout de Gourde et lecture des produits](captures/captures-7/image-3.png)
-
-Ajout du produit « Gourde » :
-
-```text
-{"id":4,"name":"Gourde","price_cents":900,"created_at":"2026-10-26T10:12:53.225Z"}
-```
-
-Après `docker compose down` puis `docker compose up -d`, « Gourde » est toujours présente :
-
-```text
-{"id":4,"name":"Gourde","price_cents":900,"created_at":"2026-10-26T10:12:53.225Z"}
-```
-
-![down puis up de la stack](captures/captures-7/image-5.png)
-
-![Produits après down puis up](captures/captures-7/image-6.png)
-
-`down` supprime les conteneurs et le réseau mais conserve le volume nommé `pgdata`.
-
-### Secrets
-
-Le secret n’apparaît pas en clair dans la configuration du conteneur :
-
-```text
-POSTGRES_PASSWORD_FILE=/run/secrets/db_password
-```
-
-Le fichier `/run/secrets/db_password` est monté dans `db` et dans `api`.
-
-![Secret monté et variables PG dans api](captures/captures-7/image-4.png)
-
-### Fichiers sensibles et Git
-
-`.env` et `secrets/db_password.txt` sont ignorés, `.env.example` et `secrets/db_password.txt.example` sont suivis.
-
-![Vérification Git des fichiers sensibles](captures/captures-7/image-7.png)
-
-## Repartir de zéro
+### Scan initial
 
 ```bash
-docker compose down -v
-docker compose up -d --build
+docker build -f api/Dockerfile.multi -t demo-api:multi ./api
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
+  --no-progress demo-api:multi | tee scan-avant.txt
 ```
 
-`down -v` supprime aussi le volume `pgdata` : `db/init.sql` est rejoué au démarrage suivant et les trois produits initiaux reviennent.
+Extrait observé :
+
+```text
+demo-api:multi (alpine 3.20.3)
+==============================
+Total: 21 (HIGH: 19, CRITICAL: 2)
+
+Node.js (node-pkg)
+==================
+Total: 34 (HIGH: 31, CRITICAL: 3)
+```
+
+### Correction des dépendances
+
+```bash
+cd api
+npm audit fix
+npm audit --omit=dev
+```
+
+`npm audit fix` a mis à jour le lockfile et `npm audit --omit=dev` s’est terminé par :
+
+```text
+found 0 vulnerabilities
+```
+
+### Scan après correction
+
+```bash
+docker build -f api/Dockerfile.multi -t demo-api:multi ./api
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
+  --ignore-unfixed --no-progress demo-api:multi | tee scan-apres.txt
+```
+
+Extraits observés :
+
+```text
+│ demo-api:multi (alpine 3.24.3)                        │  alpine  │        0        │
+│ app/node_modules/express/package.json                 │ node-pkg │        0        │
+│ app/node_modules/pg/package.json                      │ node-pkg │        0        │
+```
+
+Le rapport complet ne contient plus aucune ligne de vulnérabilité HIGH/CRITICAL. J’ai aussi lancé un scan JSON sans `--ignore-unfixed`, puis compté les résultats : les deux familles sont à zéro.
+
+```bash
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
+  --format json --no-progress demo-api:multi > /tmp/scan-after-all.json
+```
+
+```text
+Comptage des résultats :
+demo-api:multi (alpine 3.24.3) os-pkgs 0
+Node.js lang-pkgs 0
+```
+
+### Vérification de l’image
+
+```bash
+docker run -d --name demo-api-trivy-check -p 127.0.0.1:18080:3000 demo-api:multi
+sleep 18
+curl -s -w '\nHTTP %{http_code}\n' http://127.0.0.1:18080/health
+docker inspect demo-api-trivy-check --format '{{.State.Health.Status}}'
+docker exec demo-api-trivy-check sh -c 'command -v npm || echo "npm absent"'
+docker rm -f demo-api-trivy-check
+```
+
+Sorties observées :
+
+```text
+{"status":"UP"}
+HTTP 200
+healthy
+npm absent
+```
+
+## Preuve de la gate CI
+
+Le workflow complet est dans [`.github/workflows/ci.yml`](.github/workflows/ci.yml). L’étape qui bloque une régression est :
+
+```yaml
+- name: Scanner l'image avec Trivy
+  uses: aquasecurity/trivy-action@0.36.0
+  with:
+    image-ref: demo-api:ci
+    scanners: vuln
+    severity: CRITICAL,HIGH
+    ignore-unfixed: true
+    exit-code: '1'
+    format: table
+```
+
+J’ai reproduit l’étape de build de la CI localement ; l’image `demo-api:ci` s’est chargée sans erreur :
+
+```bash
+docker buildx build --load -f api/Dockerfile.multi -t demo-api:ci ./api
+```
+
+J’ai ensuite reproduit les deux états de la gate avec la même commande Trivy et `--exit-code 1`.
+
+Régression volontaire, en reconstruisant une image temporaire avec l’ancienne base `node:22.11-alpine` :
+
+```bash
+sed 's#node:22.23.4-alpine3.24#node:22.11-alpine#g' api/Dockerfile.multi > /tmp/Dockerfile.regression
+docker build -f /tmp/Dockerfile.regression -t demo-api:regression ./api
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
+  --ignore-unfixed --exit-code 1 --no-progress demo-api:regression
+```
+
+Résultat observé : code de sortie `1`, avec `Total: 21 (HIGH: 19, CRITICAL: 2)`. La CI serait rouge.
+
+Image corrigée :
+
+```bash
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
+  --ignore-unfixed --exit-code 1 --no-progress demo-api:multi
+```
+
+Résultat observé : code de sortie `0`, avec `demo-api:multi (alpine 3.24.3)` à `0` vulnérabilité. La CI serait verte.
+
+Les deux runs GitHub Actions seront à ajouter après le push : je n’ai pas poussé ni créé de tag à la place de l’utilisateur.
+
+## Captures d’écran
+
+Aucune capture n’a été fournie pour cette quête. Les preuves sont les rapports [`scan-avant.txt`](scan-avant.txt) et [`scan-apres.txt`](scan-apres.txt), ainsi que les sorties ci-dessus. Les captures des deux runs CI pourront être ajoutées en même temps que les liens de publication.
 
 ## Liens de publication
 
 - Dépôt GitHub : [ynov-x-anthony/GARRIGUES_hugo_demo-api](https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api)
-- Branche de rendu : [`quest/docker-7-docker-compose`](https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api/tree/quest/docker-7-docker-compose)
+- Branche de rendu : [`quest/docker-8-analyse-trivy`](https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api/tree/quest/docker-8-analyse-trivy)
+- Workflow : [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+- Run rouge (régression volontaire) : à compléter après le push.
+- Run vert (image corrigée) : à compléter après le push.
