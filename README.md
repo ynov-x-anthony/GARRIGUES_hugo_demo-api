@@ -2,15 +2,22 @@
 
 ## Travail réalisé
 
-J’ai écrit `compose.yml` pour lancer les trois services du fil rouge : `api` construit depuis `./api`, `db` sur `postgres:16-alpine` et `adminer` sur `adminer:4`. La base n’est pas publiée sur l’hôte ; l’API est publiée sur `${API_PORT:-8080}` et Adminer sur `${ADMINER_PORT:-8081}`. `db` utilise le volume nommé `pgdata`, monte `db/init.sql` en lecture seule et expose un healthcheck `pg_isready`. `api` attend que `db` soit `service_healthy` avant de démarrer, puis redémarre avec `restart: unless-stopped`.
+`compose.yml` lance les trois services du fil rouge :
 
-J’ai centralisé la configuration dans `.env`, avec un `.env.example` commité et `.env` ignoré. Le mot de passe de la base passe par un secret Docker monté dans `/run/secrets/db_password` : PostgreSQL le lit avec `POSTGRES_PASSWORD_FILE` et l’API avec `PGPASSWORD_FILE`. J’ai adapté `api/db.js` pour lire ce fichier quand la variable est définie. `secrets/db_password.txt` est ignoré ; seul `secrets/db_password.txt.example` est versionné. `COMPOSE_PROJECT_NAME=demo-api` garde des noms de conteneurs lisibles et conformes au cours.
+- `api` : construit depuis `./api`, publiée sur `${API_PORT:-8080}`.
+- `db` : `postgres:16-alpine`, non publiée sur l’hôte, avec le volume nommé `pgdata`, `db/init.sql` monté en lecture seule et un healthcheck `pg_isready`.
+- `adminer` : `adminer:4`, publiée sur `${ADMINER_PORT:-8081}`.
 
-`.env` sert uniquement à l’interpolation `${}` de Compose. Il n’est pas injecté tel quel dans les conteneurs : les variables utiles sont déclarées dans `environment:`, et le mot de passe arrive par le secret.
+`api` attend que `db` soit `service_healthy` avant de démarrer et redémarre avec `restart: unless-stopped`.
+
+La configuration passe par `.env` (interpolation `${}` de Compose, avec `.env.example` versionné et `.env` ignoré). Le mot de passe de la base est un secret Docker monté dans `/run/secrets/db_password` : PostgreSQL le lit via `POSTGRES_PASSWORD_FILE`, l’API via `PGPASSWORD_FILE`. `api/db.js` lit ce fichier lorsque la variable est définie. `secrets/db_password.txt` est ignoré par Git, seul `secrets/db_password.txt.example` est versionné.
+
+`.env` ne sert qu’à l’interpolation : il n’est pas injecté dans les conteneurs. Les variables utiles sont déclarées dans `environment:`, et le mot de passe arrive par le secret.
 
 ## Prérequis et démarrage
 
-Docker avec le plugin Compose v2, et les ports 8080 et 8081 libres.
+- Docker avec le plugin Compose v2.
+- Les ports 8080 et 8081 libres.
 
 ```bash
 cp .env.example .env
@@ -25,15 +32,9 @@ URLs :
 - Santé : <http://localhost:8080/health> et <http://localhost:8080/ready>
 - Adminer : <http://localhost:8081> (serveur `db`, utilisateur `demo`, base `demo`)
 
-## Commandes et vérifications
+## Vérifications
 
-J’ai lancé la stack depuis la racine du dépôt :
-
-```bash
-docker compose up -d --build
-```
-
-Extrait observé :
+### Démarrage de la stack
 
 ```text
 Container demo-api-db-1 Healthy
@@ -41,13 +42,11 @@ Container demo-api-api-1 Started
 Container demo-api-adminer-1 Started
 ```
 
-`docker compose config --quiet` s’est terminé avec le code 0. La configuration résolue contient `POSTGRES_PASSWORD_FILE=/run/secrets/db_password` et aucun mot de passe en clair.
+![docker compose up -d --build](captures/captures-7/image-1.png)
 
-État des services :
+`docker compose config --quiet` se termine avec le code 0. La configuration résolue contient `POSTGRES_PASSWORD_FILE=/run/secrets/db_password` et aucun mot de passe en clair.
 
-```bash
-docker compose ps
-```
+### État des services
 
 ```text
 NAME                 IMAGE                COMMAND                  SERVICE   CREATED          STATUS                    PORTS
@@ -56,13 +55,13 @@ demo-api-api-1       demo-api-api         "docker-entrypoint.s…"   api       4
 demo-api-db-1        postgres:16-alpine   "docker-entrypoint.s…"   db        41 seconds ago   Up 40 seconds (healthy)   5432/tcp
 ```
 
+![docker compose ps](captures/captures-7/image-2.png)
+
 La base est `healthy`, l’API est `Up (healthy)` et `db` ne publie que le port interne `5432/tcp`. Adminer répond en HTTP 200 sur `localhost:8081`.
 
-Les produits de `db/init.sql` sont bien présents :
+### API et persistance
 
-```bash
-curl -s localhost:8080/products | jq -c '.[] | {id,name,price_cents}'
-```
+Les produits de `db/init.sql` sont présents :
 
 ```text
 {"id":3,"name":"T-shirt conteneur","price_cents":1990}
@@ -70,40 +69,45 @@ curl -s localhost:8080/products | jq -c '.[] | {id,name,price_cents}'
 {"id":1,"name":"Sticker Demo","price_cents":150}
 ```
 
-La commande brute `curl -s localhost:8080/products` renvoie les mêmes produits avec le champ `created_at` en plus.
+`curl -s localhost:8080/products` renvoie les mêmes produits avec le champ `created_at` en plus.
 
-J’ai ajouté « Gourde » :
+![Ajout de Gourde et lecture des produits](captures/captures-7/image-3.png)
 
-```bash
-curl -s -X POST -H 'content-type: application/json' \
-  -d '{"name":"Gourde","price_cents":900}' localhost:8080/products
-```
+Ajout du produit « Gourde » :
 
 ```text
 {"id":4,"name":"Gourde","price_cents":900,"created_at":"2026-10-26T10:12:53.225Z"}
 ```
 
-Après `docker compose down` puis `docker compose up -d`, la Gourde est toujours là :
-
-```bash
-curl -s localhost:8080/products | jq -c '.[] | select(.name=="Gourde")'
-```
+Après `docker compose down` puis `docker compose up -d`, « Gourde » est toujours présente :
 
 ```text
 {"id":4,"name":"Gourde","price_cents":900,"created_at":"2026-10-26T10:12:53.225Z"}
 ```
 
-`down` supprime les conteneurs et le réseau mais conserve le volume nommé `pgdata`. Le secret n’apparaît pas en clair dans la configuration du conteneur :
+![down puis up de la stack](captures/captures-7/image-5.png)
 
-```bash
-docker inspect demo-api-db-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep PASSWORD
-```
+![Produits après down puis up](captures/captures-7/image-6.png)
+
+`down` supprime les conteneurs et le réseau mais conserve le volume nommé `pgdata`.
+
+### Secrets
+
+Le secret n’apparaît pas en clair dans la configuration du conteneur :
 
 ```text
 POSTGRES_PASSWORD_FILE=/run/secrets/db_password
 ```
 
 Le fichier `/run/secrets/db_password` est monté dans `db` et dans `api`.
+
+![Secret monté et variables PG dans api](captures/captures-7/image-4.png)
+
+### Fichiers sensibles et Git
+
+`.env` et `secrets/db_password.txt` sont ignorés, `.env.example` et `secrets/db_password.txt.example` sont suivis.
+
+![Vérification Git des fichiers sensibles](captures/captures-7/image-7.png)
 
 ## Repartir de zéro
 
@@ -113,10 +117,6 @@ docker compose up -d --build
 ```
 
 `down -v` supprime aussi le volume `pgdata` : `db/init.sql` est rejoué au démarrage suivant et les trois produits initiaux reviennent.
-
-## Capture d’écran
-
-![Stack Compose, persistance de Gourde et preuve du secret](captures/captures-7/docker-7-compose.png)
 
 ## Liens de publication
 
