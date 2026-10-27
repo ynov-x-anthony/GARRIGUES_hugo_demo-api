@@ -4,8 +4,8 @@ Projet de fin de fil rouge : une mini landing page qui sert de support pour
 remettre en pratique tout ce qu'on a vu ensemble en Docker — sécurité,
 build multi-stage, scan Trivy et petite CI/CD. Le contenu est volontairement
 très simple (une page : hero vidéo de nuages + section « Ce que l'image
-garantit »), et le langage visuel est repris du portfolio personnel « HGRS »
-(dépôt local `Landing-test`, Next.js) : noir & blanc dithering, typo mono,
+garantit »), et le langage visuel est repris du portfolio personnel « HGRS » :
+noir & blanc dithering, typo mono,
 nav pill floue, cartes fines à bordures 1px. Toute la difficulté est sur
 l'emballage Docker, jamais sur le code.
 
@@ -24,7 +24,7 @@ Fichiers créés ou modifiés :
 |---|---|
 | `landing/site/index.html` | la page : hero vidéo (support : poster + `<video>`), section des 6 garanties de l'image, footer avec le numéro de build injecté |
 | `landing/site/style.css` | la feuille de style : langage visuel inspiré du portfolio HGRS (noir, typo mono, nav pill backdrop-blur, cartes `#09090b` à bordures fines), ~400 lignes sans framework |
-| `assets/clouds-dither.mp4`, `assets/clouds-dither.png` | l'asset visuel du dépôt `Landing-test` : vidéo de nuages en dithering + poster, en fond du hero |
+| `assets/clouds-dither.mp4`, `assets/clouds-dither.png` | l'asset visuel : vidéo de nuages en dithering + poster, en fond du hero |
 | `landing/build.mjs` | script de build sans dépendance npm : minification HTML simple + injection du numéro de build, sortie dans `build/` |
 | `landing/Dockerfile` | build multi-stage : stage `build` (node:22-alpine) puis stage runtime (nginxinc/nginx-unprivileged:1.27-alpine) |
 | `landing/nginx.conf` | serveur sur le port 8080, `server_tokens off`, gzip, route `/healthz` pour le HEALTHCHECK, cache sur `/assets/` |
@@ -199,19 +199,11 @@ Captures Chrome headless sur les pages servies par le conteneur :
 
 ## Liens de publication
 
-À compléter de ton côté (je n'ai fait ni commit, ni push) :
-
-- Repo GitHub (organisation `ynov-x-anthony`) :
-  `https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api`
-- Run de CI (après push) : onglet Actions du repo → `landing-docker`
-- Image publiée sur GHCR (après le run sur `main`) :
-  `https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api/pkgs/container/…`
-
-À noter avant d'envoyer :
-
-- `assets/clouds-dither.mp4` fait ~24 Mo : il doit être committé (il est
-  nécessaire au build, GitHub l'accepte sans LFS sous 100 Mo).
-- `secrets/` est maintenant ignoré par Git : vérifie qu'il n'a jamais été
-  commité auparavant (`git log --all -- secrets` ne doit rien montrer).
-- Le port hôte 8080 de ta machine est occupé par la stack Compose du fil
-  rouge : pour tester la landing, c'est `8090:8080`.
+- Repo GitHub : [ynov-x-anthony/GARRIGUES_hugo_demo-api](https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api)
+- Branche du projet : [`projet/docker-final`](https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api/tree/projet/docker-final)
+- Run CI `landing-docker` (build + scan Trivy) :
+  [run 40507896466](https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api/actions/runs/40507896466) —
+  terminé avec succès en 46 s.
+- Image GHCR : `ghcr.io/ynov-x-anthony/garrigues_hugo_demo-api/landing-clouds`
+  (tags `sha` + `latest`) — le job `publish` la pousse automatiquement
+  après la fusion de la branche sur `main`.
