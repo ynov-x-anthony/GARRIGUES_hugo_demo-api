@@ -1,0 +1,281 @@
+/* Landing Clouds — mini-projet Docker.
+   Langage visuel repris du portfolio HGRS (noir, mono, pill, traits 1px),
+   contenu de l'ancienne page : hero vidéo + « Ce que l'image garantit ». */
+:root {
+  /* Fond porté par html seul (peint avant la vidéo en z-index négatif). */
+  --bg: #000000;
+  --panel: #09090b;
+  --ink: #ffffff;
+  --muted: #a1a1aa;
+  --faint: #71717a;
+  --green: #10b981;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.15);
+  color-scheme: dark;
+}
+
+html {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Helvetica Neue", Helvetica, Arial, "Segoe UI", sans-serif;
+  scroll-behavior: smooth;
+  scroll-padding-top: 110px;
+}
+
+body {
+  margin: 0;
+  min-height: 100%;
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
+}
+
+img, svg, video { display: block; }
+[hidden] { display: none !important; }
+.i { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.muted { color: var(--muted); }
+.muted-light { color: var(--muted); }
+.faint { color: var(--faint); }
+.nowrap { white-space: nowrap; }
+code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.mono-tiny {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  line-height: 1.6;
+  letter-spacing: 0.13em;
+  color: var(--muted);
+}
+
+::selection { background: #fff; color: #000; }
+:focus-visible { outline: 2px solid #fff; outline-offset: 5px; }
+
+/* ---------- Nav pill (design HGRS) ---------- */
+.site-header {
+  position: fixed;
+  inset-inline: 0; top: 16px; z-index: 50;
+  margin-inline: auto;
+  width: calc(100% - 1.5rem);
+  max-width: 80rem;
+}
+@media (min-width: 640px) { .site-header { top: 24px; width: calc(100% - 3rem); } }
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 68px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(12px);
+}
+@media (min-width: 640px) { .nav { border-radius: 999px; padding: 0 24px; } }
+
+.brand { text-decoration: none; color: inherit; padding: 12px 0; }
+.brand-line { display: block; font-family: "SFMono-Regular", Consolas, monospace; font-size: 14px; font-weight: 500; letter-spacing: 0.05em; }
+.brand-sub { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; letter-spacing: 0.16em; color: var(--muted); white-space: nowrap; }
+
+.availability-dot {
+  width: 6px; height: 6px; border-radius: 999px; background: var(--green);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.9);
+  animation: availability 2.5s ease-in-out infinite;
+}
+@keyframes availability { 50% { opacity: 0.35; } }
+
+.nav-cta {
+  display: inline-flex; align-items: center; gap: 9px;
+  min-height: 40px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px; padding: 0 16px;
+  background: rgba(255, 255, 255, 0.02);
+  color: #fff;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px; letter-spacing: 0.12em;
+  text-decoration: none;
+  transition: background 160ms ease;
+}
+.nav-cta:hover { background: rgba(255, 255, 255, 0.08); }
+.nav-cta .i { width: 14px; height: 14px; }
+
+/* ---------- Hero vidéo ---------- */
+.hero {
+  position: relative;
+  isolation: isolate;
+  display: flex; flex-direction: column; justify-content: space-between;
+  min-height: 100svh;
+  overflow: hidden;
+}
+
+.hero-clouds {
+  position: absolute;
+  inset-inline: 0;
+  top: -48px; bottom: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: #000;
+}
+.clouds-img, .clouds-video {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: bottom;
+  filter: grayscale(1);
+}
+.clouds-tint { position: absolute; inset: 0; background: linear-gradient(to top, transparent, rgba(0,0,0,0.4), #000); }
+.clouds-fade { position: absolute; inset-inline: 0; bottom: 0; height: 128px; background: linear-gradient(to top, #000, transparent); }
+
+.hero-narrative {
+  position: relative;
+  margin-inline: auto;
+  width: 100%; max-width: 64rem;
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center;
+  padding: clamp(150px, 20svh, 210px) 20px 24px;
+}
+@media (min-width: 640px) { .hero-narrative { padding-inline: 32px; } }
+
+.eyebrow { margin: 0 0 28px; font-family: "SFMono-Regular", Consolas, monospace; font-size: min(12px, 3vw); letter-spacing: 0.08em; color: var(--muted); }
+.eyebrow .faint { margin-inline: 8px; }
+
+h1 {
+  margin: 0;
+  font-size: clamp(3.5rem, 12vw, 8rem);
+  line-height: 0.95;
+  font-weight: 500;
+  letter-spacing: -0.06em;
+}
+
+.lead {
+  margin: 28px 0 0;
+  max-width: 39rem;
+  font-size: 1.0625rem;
+  line-height: 1.75rem;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.9);
+}
+@media (min-width: 640px) { .lead { font-size: 1.125rem; } }
+
+.btn-primary {
+  display: inline-flex; min-height: 48px; align-items: center; justify-content: center; gap: 14px;
+  margin-top: 32px;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 24px;
+  background: #fff;
+  color: #000;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 160ms ease;
+}
+.btn-primary:hover { transform: scale(1.025); }
+.btn-primary .i { width: 16px; height: 16px; }
+
+.hero-foot {
+  position: relative;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+  padding: 0 24px 28px;
+}
+@media (min-width: 640px) { .hero-foot { padding-inline: 48px; } }
+.hero-foot > p { margin: 0; }
+
+/* ---------- Garanties ---------- */
+.garanties {
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  padding: 96px 20px 80px;
+}
+@media (min-width: 640px) { .garanties { padding: 128px 32px 96px; } }
+
+.garanties-head {
+  max-width: 63rem;
+  margin-inline: auto;
+  margin-bottom: 56px;
+}
+.section-eyebrow {
+  margin: 0 0 20px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  color: var(--muted);
+}
+h2 {
+  margin: 0;
+  font-size: clamp(2.5rem, 4.7vw, 4rem);
+  line-height: 1.05;
+  font-weight: 500;
+  letter-spacing: -0.055em;
+}
+
+.garanties-grid {
+  max-width: 80rem;
+  margin-inline: auto;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 700px) { .garanties-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1060px) { .garanties-grid { grid-template-columns: repeat(3, 1fr); } }
+
+.guarantee {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  padding: 28px 24px 30px;
+  transition: background 200ms ease, border-color 200ms ease;
+}
+.guarantee:hover { border-color: var(--line-strong); background: #0d0d10; }
+
+.g-tag {
+  margin: 0;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--faint);
+}
+.guarantee h3 {
+  margin: 18px 0 0;
+  font-size: 1.25rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.guarantee p {
+  margin: 12px 0 0;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+/* ---------- Footer ---------- */
+.site-footer {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  border-top: 1px solid var(--line);
+  padding: 32px 20px;
+  text-align: center;
+}
+@media (min-width: 640px) { .site-footer { flex-direction: row; justify-content: space-between; } }
+
+/* ---------- Reveal discret + reduced motion ---------- */
+.reveal { opacity: 0.5; transform: translateY(20px); transition: opacity 0.65s cubic-bezier(0.22, 1, 0.36, 1), transform 0.65s cubic-bezier(0.22, 1, 0.36, 1); }
+.reveal.in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .availability-dot { animation: none; }
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .btn-primary:hover { transform: none; }
+}

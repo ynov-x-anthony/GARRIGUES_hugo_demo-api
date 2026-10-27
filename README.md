@@ -1,89 +1,217 @@
-# demo-api
+# Projet final — Landing page clouds, conteneurisée
 
-Le fil rouge des quêtes Docker : une mini-API "catalogue" que tu vas
-conteneuriser, faire persister, mettre en réseau, orchestrer et sécuriser,
-une quête à la fois.
+Projet de fin de fil rouge : une mini landing page qui sert de support pour
+remettre en pratique tout ce qu'on a vu ensemble en Docker — sécurité,
+build multi-stage, scan Trivy et petite CI/CD. Le contenu est volontairement
+très simple (une page : hero vidéo de nuages + section « Ce que l'image
+garantit »), et le langage visuel est repris du portfolio personnel « HGRS »
+(dépôt local `Landing-test`, Next.js) : noir & blanc dithering, typo mono,
+nav pill floue, cartes fines à bordures 1px. Toute la difficulté est sur
+l'emballage Docker, jamais sur le code.
 
-Le métier est volontairement trivial (`Node` + `Express` + `PostgreSQL`,
-un catalogue de produits) : toute la difficulté est sur **Docker**, jamais
-sur le code applicatif.
+## Travail réalisé
 
-## Point de départ
+L'objectif était de partir d'un asset visuel (une vidéo de nuages en
+dithering et un poster PNG) et d'en faire un vrai projet conteneurisé avec
+toutes les bonnes pratiques du fil rouge. Je suis parti sur une page
+statique plutôt que sur l'API Express du fil rouge : c'est un support
+différent, plus lisible, et il permet de montrer le multi-stage avec un
+runtime autre que Node.
 
-Ce dossier est ce que tu clones **avant ta première quête Docker**. Il n'y a
-volontairement **aucun fichier Docker** dedans, ni `Dockerfile`, ni
-`compose.yml` : ce sont précisément les fichiers que tu vas écrire, quête
-après quête, en faisant grossir ce dépôt.
-
-Sans conteneur, cette API ne démarre pas telle quelle : elle a besoin d'un
-PostgreSQL joignable pour répondre. C'est normal, et c'est tout le sujet de
-la première quête que de la faire tourner dans Docker.
-
-## Récupérer ce starter dans ton propre repo
-
-Ce dépôt est un **starter en lecture seule** : tu ne pousses jamais
-directement ici. Avant de démarrer la première quête :
-
-1. **Clone** ce repo starter :
-   ```bash
-   git clone git@github.com:ynov-x-anthony/docker-demo-api-starter.git NOM_prenom_demo-api
-   cd NOM_prenom_demo-api
-   ```
-2. **Supprime le remote `origin`** (il pointe vers le starter, pas vers toi) :
-   ```bash
-   git remote remove origin
-   ```
-3. **Crée ton propre repo** sur GitHub, dans l'organisation `ynov-x-anthony`,
-   en respectant la nomenclature **`NOM_prenom_demo-api`** (ex. :
-   `DUPONT_jean_demo-api`), puis ajoute-le comme nouveau remote et pousse :
-   ```bash
-   git remote add origin git@github.com:ynov-x-anthony/NOM_prenom_demo-api.git
-   git push -u origin main
-   ```
-
-À partir de là, c'est **ton** repo : chaque quête s'y ajoute par des commits,
-et c'est lui qui sera évalué, pas le starter.
-
-## Ce que contient le repo
+Fichiers créés ou modifiés :
 
 | Fichier | Rôle |
 |---|---|
-| `api/server.js` | l'API Express (`/`, `/version`, `/health`, `/ready`, `/products`) |
-| `api/db.js` | connexion PostgreSQL, entièrement pilotée par des variables d'environnement |
-| `api/package.json`, `api/package-lock.json` | dépendances (`express`, `pg`) |
-| `db/init.sql` | création de la table `products` + quelques données de démo |
+| `landing/site/index.html` | la page : hero vidéo (support : poster + `<video>`), section des 6 garanties de l'image, footer avec le numéro de build injecté |
+| `landing/site/style.css` | la feuille de style : langage visuel inspiré du portfolio HGRS (noir, typo mono, nav pill backdrop-blur, cartes `#09090b` à bordures fines), ~400 lignes sans framework |
+| `assets/clouds-dither.mp4`, `assets/clouds-dither.png` | l'asset visuel du dépôt `Landing-test` : vidéo de nuages en dithering + poster, en fond du hero |
+| `landing/build.mjs` | script de build sans dépendance npm : minification HTML simple + injection du numéro de build, sortie dans `build/` |
+| `landing/Dockerfile` | build multi-stage : stage `build` (node:22-alpine) puis stage runtime (nginxinc/nginx-unprivileged:1.27-alpine) |
+| `landing/nginx.conf` | serveur sur le port 8080, `server_tokens off`, gzip, route `/healthz` pour le HEALTHCHECK, cache sur `/assets/` |
+| `.dockerignore` | exclut `secrets/`, `api/`, `db/`, `.git`, `node_modules`… du contexte de build |
+| `.gitignore` | ajout de `secrets/` pour qu'aucun secret ne se retrouve suivi par Git |
+| `.github/workflows/landing-ci.yml` | CI/CD : build de l'image, scan Trivy bloquant, publication sur GHCR sur `main` |
 
-## Les routes de l'API
+Problème rencontré et corrigé en design : la vidéo était bien servie
+(codec `avc1`, octets identiques à l'original) mais invisible à l'écran.
+Cause : le fond opaque était posé sur `html` **et** `body` en CSS, et la
+couche de fond du `body` peint au-dessus des éléments en `z-index`
+négatif — la vidéo partait donc sous une sorte de fond noir uni. Le fond
+vit désormais sur `html` seul et `body` est transparent. Un voile sombre
+qui masquait les nuages a aussi été retiré.
 
-| Méthode | Route | Effet |
-|---|---|---|
-| `GET` | `/` | infos application + version |
-| `GET` | `/version` | numéro de version courant |
-| `GET` | `/health` | liveness, ne touche pas la base |
-| `GET` | `/ready` | readiness, teste la connexion à la base |
-| `GET` | `/products` | liste des produits |
-| `POST` | `/products` | crée un produit : `{ "name": "...", "price_cents": 1234 }` |
+Les bonnes pratiques couvertes :
 
-## Ta progression, quête après quête
+- **Utilisateur non-root** : l'image de base `nginxinc/nginx-unprivileged`
+  démarre en uid 101, c'est verrouillé par un `USER 101` explicite.
+  `docker exec landing-test id` renvoie `uid=101(nginx)`.
+- **Image légère** : pas de Node au runtime, base alpine seulement.
+  Image finale : ~150 Mo (dont ~27 Mo d'assets vidéo/affiche transférés).
+- **Pas de secrets** : le dossier `secrets/` (et `db_password.txt` de la
+  quête build multi-étapes) est exclu du contexte par `.dockerignore` et
+  ignoré par Git. Une recherche de `*password*` dans le système de
+  fichiers de l'image ne renvoie rien.
+- **HEALTHCHECK** sur `http://127.0.0.1:8080/healthz`, toutes les 30 s.
+- **Secrets de CI** : seul `GITHUB_TOKEN` fourni par GitHub Actions est
+  utilisé pour la publication sur GHCR ; rien n'est écrit en dur.
+- **Versions de base images figées** (`node:22-alpine`,
+  `nginxinc/nginx-unprivileged:1.27-alpine`).
 
-| Quête | Ce que tu ajoutes au repo |
-|---|---|
-| Découverte de Docker | rien ici, tu manipules des images publiques et un `psql` en conteneur |
-| Le Dockerfile | `api/Dockerfile`, `api/.dockerignore` : l'API tourne enfin dans un conteneur |
-| Les volumes | un volume nommé pour la persistance de PostgreSQL |
-| Les réseaux | des réseaux dédiés, la base jamais exposée directement |
-| Compose | `compose.yml`, `.env.example` : tous les services démarrent ensemble |
-| Dockerfile et sécurité | ton `Dockerfile` durci : utilisateur non-root, `HEALTHCHECK` |
-| Builds multi-étapes et gestion des secrets | `api/Dockerfile.multi` : image allégée, secrets hors de l'image |
-| Analyse de vulnérabilité avec Trivy | un pipeline CI qui scanne ton image et bloque sur les failles critiques |
+## Commandes et vérifications
 
-## Prérequis machine (macOS / Linux / Windows)
+### Build multi-stage
 
-- **Docker Engine + Compose v2** : le plugin intégré, invoqué en deux mots
-  `docker compose` (pas l'ancien binaire autonome `docker-compose` v1).
-  `docker compose version` doit répondre `v2.x` ou une version supérieure
-  (v3, v4, v5…). Ce qui compte, c'est que ce ne soit pas du v1 legacy.
-- macOS / Windows : **Docker Desktop** (ou Colima / Rancher Desktop).
-  Sous Windows, backend **WSL 2** : travaille depuis un terminal **WSL**.
-- `git`, `curl`. Node est nécessaire **seulement** si tu régénères
-  `package-lock.json` (`cd api && npm install`, déjà commité ici).
+Attendu : l'image se construit depuis la racine du repo (contexte), le
+stage `build` prépare le site compilé et le runtime ne reçoit que le
+contenu servi.
+
+Commande exécutée :
+
+```bash
+docker build -f landing/Dockerfile --build-arg LAND_VERSION=1.0.0 \
+  -t landing-clouds:1.0.0 .
+```
+
+Constaté : le build passe les deux étages :
+
+```
+#8  [build 1/6] FROM docker.io/library/node:22-alpine
+#9  [stage-1 1/3] FROM docker.io/nginxinc/nginx-unprivileged:1.27-alpine
+#14 [build 6/6] RUN node build.mjs
+```
+
+Taille constatée :
+
+```
+$ docker images landing-clouds:1.0.0 --format '{{.Size}}'
+150MB
+```
+
+### Démarrage et vérifications d'exécution
+
+Attendu : la page répond, la vidéo est servie, le conteneur est healthy et
+tourne en non-root. Le port hôte 8080 étant déjà pris par la stack
+`demo-api-compose` de la quête Compose (que je n'ai pas touchée), je
+publie la landing sur le port hôte 8090.
+
+```bash
+docker run -d --name landing-test -p 8090:8080 landing-clouds:1.0.0
+```
+
+Constaté :
+
+```
+$ docker inspect --format '{{.State.Health.Status}}' landing-test
+healthy
+
+$ curl -s http://127.0.0.1:8090/healthz
+ok
+
+$ docker exec landing-test id
+uid=101(nginx) gid=101(nginx) groups=101(nginx)
+
+$ curl -sI http://127.0.0.1:8090/assets/clouds-dither.mp4 | head -3
+HTTP/1.1 200 OK
+Server: nginx          ← pas de version de nginx : server_tokens off fonctionne
+Content-Type: video/mp4
+
+$ curl -s http://127.0.0.1:8090/ | grep -o 'Build <span class="muted-light">[^<]*'
+Build <span class="muted-light">1.0.0   ← le numéro de build a bien été injecté au build
+```
+
+### Absence de secrets dans l'image
+
+```
+$ docker exec landing-test sh -c 'find / -xdev -name "*password*" 2>/dev/null'
+(aucun résultat)
+
+$ docker exec landing-test find /usr/share/nginx/html -maxdepth 1
+/usr/share/nginx/html
+/usr/share/nginx/html/index.html
+/usr/share/nginx/html/style.css     ← uniquement le contenu compilé,
+/usr/share/nginx/html/assets         pas de sources, pas de secrets
+```
+
+## Preuve spécifique : scan Trivy
+
+Trivy n'était pas installé en CLI sur ma machine, je l'ai donc exécuté de
+la même façon que la CI : via l'image officielle `aquasec/trivy`, montée
+sur le socket Docker local.
+
+### Premier scan : des failles détectées, la CI aurait bloqué
+
+```
+$ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+    aquasec/trivy:latest image \
+    --severity CRITICAL,HIGH --ignore-unfixed landing-clouds:1.0.0
+
+Report Summary
+Total: 58 (HIGH: 56, CRITICAL: 2)
+(pcre2, tiff, zlib… des paquets alpine de l'image de base, avec
+correctifs disponibles)
+```
+
+Avec `exit-code: 1` (comme dans le job CI), ce scan aurait fait échouer
+le pipeline. C'était un bon cas réel de remédiation.
+
+### Remédiation
+
+J'ai ajouté dans le stage runtime du `Dockerfile` : passage temporaire en
+root, `apk update && apk upgrade --no-cache`, retour en uid 101. Puis
+rebuild et nouvelle vérification d'exécution (`healthy`, `healthz` ok).
+
+### Deuxième scan : image saine
+
+```
+$ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+    aquasec/trivy:latest image \
+    --severity CRITICAL,HIGH --ignore-unfixed landing-clouds:1.0.0
+
+│                Target                │  Type  │ Vulnerabilities │ Secrets │
+│ landing-clouds:1.0.0 (alpine 3.21.3) │ alpine │        0        │    -    │
+│                                       │        │  0 = Clean      │         │
+```
+
+## CI/CD
+
+`.github/workflows/landing-ci.yml` (déclenché sur push vers `main` et vers
+la branche du projet, sur les PR touchant `landing/` ou `assets/`, et
+manuellement via `workflow_dispatch`) :
+
+1. **build** de l'image avec `docker build-push-action` (buildx, `load: true`).
+2. **scan Trivy** avec `aquasecurity/trivy-action` : sévérités
+   CRITICAL + HIGH, `exit-code: 1`, `ignore-unfixed: true` → le pipeline
+   échoue si l'image n'est pas saine.
+3. **publication** : sur `main` seulement, l'image est poussée sur GHCR
+   (`ghcr.io/<repo>/landing-clouds:sha` + `latest`), authentifiée avec le
+   `GITHUB_TOKEN` (permissions `packages: write`).
+
+Le scan local ci-dessus reproduit exactement les étapes 1 et 2 de la CI.
+
+## Captures d'écran
+
+Captures Chrome headless sur les pages servies par le conteneur :
+
+- ![Hero avec la vidéo de nuages](captures/landing-hero.png) : le hero,
+  avec la vidéo en dithering, la nav pill et le bouton du hero.
+- ![Section garanties](captures/garanties-section.png) : les six
+  garanties de l'image, dans le langage visuel du design repris.
+
+## Liens de publication
+
+À compléter de ton côté (je n'ai fait ni commit, ni push) :
+
+- Repo GitHub (organisation `ynov-x-anthony`) :
+  `https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api`
+- Run de CI (après push) : onglet Actions du repo → `landing-docker`
+- Image publiée sur GHCR (après le run sur `main`) :
+  `https://github.com/ynov-x-anthony/GARRIGUES_hugo_demo-api/pkgs/container/…`
+
+À noter avant d'envoyer :
+
+- `assets/clouds-dither.mp4` fait ~24 Mo : il doit être committé (il est
+  nécessaire au build, GitHub l'accepte sans LFS sous 100 Mo).
+- `secrets/` est maintenant ignoré par Git : vérifie qu'il n'a jamais été
+  commité auparavant (`git log --all -- secrets` ne doit rien montrer).
+- Le port hôte 8080 de ta machine est occupé par la stack Compose du fil
+  rouge : pour tester la landing, c'est `8090:8080`.

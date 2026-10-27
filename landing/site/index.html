@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Landing page clouds, conteneurisée et durcie : multi-stage, non-root, secrets exclus, scan Trivy.">
+  <title>Clouds — mini-projet Docker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <nav aria-label="Navigation principale" class="nav">
+      <a href="#top" class="brand">
+        <span class="brand-line">CLOUDS <span class="faint">// DOCKER</span></span>
+        <span class="brand-sub"><span class="availability-dot" aria-hidden="true"></span> IMAGE DURCIE · NON-ROOT</span>
+      </a>
+      <a href="#garanties" class="nav-cta">
+        GARANTIES
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
+      </a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="top" class="hero" aria-labelledby="hero-heading">
+      <div class="hero-clouds" aria-hidden="true">
+        <img src="assets/clouds-dither.png" alt="" width="1536" height="1024" fetchpriority="high" class="clouds-img">
+        <video autoplay muted loop playsinline preload="auto" poster="assets/clouds-dither.png" class="clouds-video">
+          <source src="assets/clouds-dither.mp4" type="video/mp4">
+        </video>
+        <div class="clouds-tint"></div>
+        <div class="clouds-fade"></div>
+      </div>
+
+      <div class="hero-narrative">
+        <p class="eyebrow"><span class="faint">[</span> MINI-PROJET DOCKER <span class="faint">]</span></p>
+        <h1 id="hero-heading">Clouds</h1>
+        <p class="lead">
+          Une landing page minimale servie par nginx, emballée dans une image durcie&nbsp;:
+          build multi-étapes, utilisateur non-root, base alpine, secrets exclus,
+          scan Trivy bloquant en CI.
+        </p>
+        <a class="btn-primary" href="#garanties">Voir les garanties
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
+        </a>
+      </div>
+
+      <div class="hero-foot mono-tiny">
+        <p>PROJET FINAL<br><span class="faint">FIL ROUGE DOCKER</span></p>
+        <span>NGINX / 8080</span>
+      </div>
+    </section>
+
+    <section id="garanties" aria-labelledby="garanties-heading" class="garanties">
+      <div class="garanties-head reveal">
+        <p class="section-eyebrow">CE QUE L'IMAGE GARANTIT</p>
+        <h2 id="garanties-heading">
+          <span class="muted-light">Une image, six promesses.</span><br>
+          Vérifiées, pas décoratives.
+        </h2>
+      </div>
+
+      <div class="garanties-grid">
+        <article class="guarantee reveal">
+          <p class="g-tag">01 / NON-ROOT</p>
+          <h3>uid 101, jamais root</h3>
+          <p>nginx et ses workers tournent en utilisateur dédié <code>nginx</code> (uid 101), verrouillé par un USER explicit dans le Dockerfile.</p>
+        </article>
+        <article class="guarantee reveal">
+          <p class="g-tag">02 / MULTI-STAGE</p>
+          <h3>Node au build, nginx au runtime</h3>
+          <p>Le site est compilé dans un stage <code>node:22-alpine</code>, puis seul le dossier <code>build/</code> traverse dans l'image finale.</p>
+        </article>
+        <article class="guarantee reveal">
+          <p class="g-tag">03 / IMAGE LÉGÈRE</p>
+          <h3>Alpine, sans Node au runtime</h3>
+          <p>Base <code>nginx-unprivileged:1.27-alpine</code> : pas de Node, pas d'outils de build, ~150 Mo tout compris avec la vidéo de fond.</p>
+        </article>
+        <article class="guarantee reveal">
+          <p class="g-tag">04 / SANS SECRETS</p>
+          <h3>secrets/ exclu du contexte</h3>
+          <p>Le dossier <code>secrets/</code> est ignoré par Git et exclu par <code>.dockerignore</code> : un find *password* dans le conteneur ne renvoie rien.</p>
+        </article>
+        <article class="guarantee reveal">
+          <p class="g-tag">05 / HEALTHCHECK</p>
+          <h3>Surveillé toutes les 30 s</h3>
+          <p>Le Dockerfile déclare un HEALTHCHECK sur <code>/healthz</code> que le conteneur passe : status healthy dès le démarrage.</p>
+        </article>
+        <article class="guarantee reveal">
+          <p class="g-tag">06 / SCAN TRIVY</p>
+          <h3>CI bloquant sur HIGH + CRITICAL</h3>
+          <p>La CI scanne l'image avec <span class="nowrap">aquasecurity/trivy-action</span>, exit-code 1. Après remédiation : 0 vulnérabilité.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer mono-tiny">
+    <span>Build <span class="muted-light">__BUILD_VERSION__</span></span>
+    <span class="faint">SERVI PAR NGINX SUR LE PORT 8080, EN NON-ROOT</span>
+  </footer>
+
+  <script>
+    // Si le navigateur a bloqué l'autoplay (vidéo pourtant muettée),
+    // on retente la lecture une fois la vidéo disponible.
+    // Le poster reste en place en attendant, ou en cas d'échec.
+    const v = document.querySelector("video");
+    v.play().catch(() => {});
+    v.addEventListener("canplay", () => v.play().catch(() => {}));
+  </script>
+</body>
+</html>

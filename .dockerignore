@@ -1,0 +1,11 @@
+.git
+.github
+api
+db
+secrets
+node_modules
+captures
+AGENTS.md
+README.md
+.env
+*.log
