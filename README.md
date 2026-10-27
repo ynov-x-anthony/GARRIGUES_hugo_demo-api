@@ -118,7 +118,7 @@ Le workflow complet est dans [`.github/workflows/ci.yml`](.github/workflows/ci.y
 
 ```yaml
 - name: Scanner l'image avec Trivy
-  uses: aquasecurity/trivy-action@0.36.0
+  uses: aquasecurity/trivy-action@v0.36.0
   with:
     image-ref: demo-api:ci
     scanners: vuln
